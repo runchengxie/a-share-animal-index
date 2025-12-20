@@ -187,9 +187,10 @@ def generate_chart(path: Path, nav_df: pd.DataFrame) -> None:
     dates = nav_df["date"].tolist()
 
     plt.figure(figsize=(10, 6))
-    plt.plot(dates, nav_df["zoo_strict_nav"], label="Zoo Strict")
-    plt.plot(dates, nav_df["zoo_extended_nav"], label="Zoo Extended")
-    plt.plot(dates, nav_df["hs300_nav"], label="HS300")
+    line_kwargs = {"marker": "o", "markersize": 3}
+    plt.plot(dates, nav_df["zoo_strict_nav"], label="Zoo Strict", **line_kwargs)
+    plt.plot(dates, nav_df["zoo_extended_nav"], label="Zoo Extended", **line_kwargs)
+    plt.plot(dates, nav_df["hs300_nav"], label="HS300", **line_kwargs)
     plt.xlabel("Date")
     plt.ylabel("NAV")
     plt.title("A-share Zoo Index")
