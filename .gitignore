@@ -208,3 +208,6 @@ __marimo__/
 
 # Debugging purpose
 full_project_source.txt
+
+# Local data outputs
+data/

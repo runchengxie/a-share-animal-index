@@ -1,4 +1,5 @@
 pandas
+pyarrow
 pyyaml
 tushare
 matplotlib

@@ -36,6 +36,6 @@ jobs:
         run: |
           git config user.name "zoo-bot"
           git config user.email "zoo-bot@users.noreply.github.com"
-          git add data docs
+          git add docs
           git commit -m "daily update" || echo "no changes"
           git push

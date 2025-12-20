@@ -40,8 +40,9 @@ python src/run_daily.py --date 20240102
 python src/run_daily.py --backfill 250
 ```
 
-回填会重建 `data/nav.csv` 并刷新 `docs/` 产物，默认只写回填区间最后一天的快照。
+回填会增量更新 `docs/nav.csv` 并刷新 `docs/` 产物，默认只写回填区间最后一天的快照。
 如需生成每日持仓快照，可加 `--backfill-write-snapshots`。
+默认启用本地缓存（`data/cache`），可用 `--no-cache` 禁用，`--force-refresh` 强制刷新。
 
 ## 规则配置
 
@@ -56,10 +57,11 @@ python src/run_daily.py --backfill 250
 
 ## 产物说明
 
-- `data/nav.csv`：净值与每日收益
+- `docs/nav.csv`：净值与每日收益
 - `data/constituents_YYYYMMDD.csv`：当日成分（不含行情过滤）
 - `data/holdings_YYYYMMDD.csv`：当日成分与权重
 - `data/changes_YYYYMMDD.json`：成分变化摘要（基于 constituents，含单字词疑似误伤清单）
+- `data/cache/`：Tushare 原始数据缓存（默认不提交）
 - `docs/chart.png`：净值对比曲线
 - `docs/latest.json`：首页数据
 - `docs/badges/*.json`：徽章专用 JSON
@@ -77,7 +79,8 @@ https://img.shields.io/endpoint?url=https://<user>.github.io/<repo>/badges/zoo_s
 
 ## 方法备注
 
-- 当前版本以当日简称判定成分，历史回测需要配合 `namechange` / `bak_basic` 等历史数据。
+- 成分按每月首个交易日重算，简称使用 `namechange` 的 as-of 口径。
+- 回填使用 `list_date` / `delist_date` 过滤存量股票，减少幸存者偏差。
 - 当前净值为价格指数口径，未做分红送转调整。
 - 默认等权，遇到缺少行情的成分会自动剔除并重新归一化权重；成分变更以 constituents 为准。
 
@@ -92,7 +95,7 @@ pytest
 
 ## GitHub Actions（可选）
 
-可以在 GitHub Actions 中设置每日跑一次，更新 `docs/` 与 `data/` 并提交回仓库，用于 Pages 展示。
+可以在 GitHub Actions 中设置每日跑一次，更新 `docs/` 并提交回仓库，用于 Pages 展示。
 
 仓库内已包含 `/.github/workflows/daily.yml`，你只需要：
 

@@ -1,11 +1,11 @@
 {
-  "date": "20251219",
-  "zoo_strict_nav": 1.025284,
-  "zoo_extended_nav": 1.016889,
-  "hs300_nav": 1.003379,
-  "zoo_strict_daily": 0.025284,
-  "zoo_extended_daily": 0.016889,
-  "hs300_daily": 0.003379,
-  "zoo_strict_excess": 0.021905,
-  "zoo_extended_excess": 0.01351
+  "date": "20240102",
+  "zoo_strict_nav": 0.962627,
+  "zoo_extended_nav": 1.224381,
+  "hs300_nav": 0.884041,
+  "zoo_strict_daily": 0.003577,
+  "zoo_extended_daily": -0.00038,
+  "hs300_daily": -0.013045,
+  "zoo_strict_excess": 0.016621,
+  "zoo_extended_excess": 0.012665
 }

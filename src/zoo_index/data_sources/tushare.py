@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 import time
 
 import pandas as pd
@@ -15,8 +16,35 @@ class TradeCalendarEntry:
 
 
 class TushareClient:
-    def __init__(self, token: str) -> None:
+    def __init__(
+        self,
+        token: str,
+        cache_dir: Path | None = None,
+        use_cache: bool = True,
+        force_refresh: bool = False,
+    ) -> None:
         self._pro = ts.pro_api(token)
+        self._cache_dir = cache_dir
+        self._use_cache = use_cache
+        self._force_refresh = force_refresh
+
+    def _cache_path(self, *parts: str) -> Path | None:
+        if self._cache_dir is None:
+            return None
+        return self._cache_dir.joinpath(*parts)
+
+    def _read_cache(self, path: Path | None) -> pd.DataFrame | None:
+        if path is None or not self._use_cache or self._force_refresh:
+            return None
+        if not path.exists():
+            return None
+        return pd.read_parquet(path)
+
+    def _write_cache(self, path: Path | None, df: pd.DataFrame) -> None:
+        if path is None or not self._use_cache or df.empty:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(path, index=False)
 
     def _trade_cal_with_retry(self, **kwargs) -> pd.DataFrame:
         last_df = pd.DataFrame()
@@ -39,6 +67,18 @@ class TushareClient:
             raise ValueError("trade calendar is empty")
         row = df.iloc[0]
         return TradeCalendarEntry(date=row["cal_date"], is_open=bool(row["is_open"]))
+
+    def get_trade_calendar_range(self, start_date: str, end_date: str) -> pd.DataFrame:
+        df = self._trade_cal_with_retry(
+            exchange="",
+            start_date=start_date,
+            end_date=end_date,
+            fields="cal_date,is_open",
+        )
+        if df.empty:
+            raise ValueError("trade calendar is empty")
+        df["cal_date"] = df["cal_date"].astype(str)
+        return df
 
     def get_recent_open_date(self, end_date: str, lookback_days: int = 30) -> str:
         end = datetime.strptime(end_date, "%Y%m%d")
@@ -90,13 +130,39 @@ class TushareClient:
             lookback_days *= 2
 
     def get_stock_basic(self) -> pd.DataFrame:
-        df = self._pro.stock_basic(
-            list_status="L",
-            fields="ts_code,name,exchange,market",
-        )
-        return df.drop_duplicates(subset=["ts_code"])
+        cache_path = self._cache_path("stock_basic.parquet")
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
+        fields = "ts_code,name,exchange,market,list_date,delist_date"
+        frames: list[pd.DataFrame] = []
+        for status in ("L", "D", "P"):
+            df = self._pro.stock_basic(list_status=status, fields=fields)
+            if not df.empty:
+                frames.append(df)
+        if frames:
+            df = pd.concat(frames, ignore_index=True).drop_duplicates(subset=["ts_code"])
+        else:
+            df = pd.DataFrame(columns=fields.split(","))
+        self._write_cache(cache_path, df)
+        return df
+
+    def get_namechange(self) -> pd.DataFrame:
+        cache_path = self._cache_path("namechange.parquet")
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
+        df = self._pro.namechange(fields="ts_code,name,start_date,end_date")
+        if not df.empty:
+            df = df.drop_duplicates()
+        self._write_cache(cache_path, df)
+        return df
 
     def get_daily(self, trade_date: str) -> pd.DataFrame:
+        cache_path = self._cache_path("daily", f"{trade_date}.parquet")
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
         last = pd.DataFrame()
         for attempt in range(5):
             df = self._pro.daily(
@@ -104,12 +170,17 @@ class TushareClient:
                 fields="ts_code,close,pre_close",
             )
             if not df.empty:
+                self._write_cache(cache_path, df)
                 return df
             last = df
             time.sleep(0.6 * (2**attempt))
         return last
 
     def get_index_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+        cache_path = self._cache_path("index_daily", ts_code, f"{trade_date}.parquet")
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
         last = pd.DataFrame()
         for attempt in range(5):
             df = self._pro.index_daily(
@@ -118,6 +189,7 @@ class TushareClient:
                 fields="ts_code,close,pre_close",
             )
             if not df.empty:
+                self._write_cache(cache_path, df)
                 return df
             last = df
             time.sleep(0.6 * (2**attempt))

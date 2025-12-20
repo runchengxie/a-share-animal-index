@@ -10,7 +10,7 @@ import pandas as pd
 
 from zoo_index.config import load_rules
 from zoo_index.data_sources.tushare import TushareClient
-from zoo_index.index import build_constituents, compute_equal_weight_return, prepare_universe
+from zoo_index.index import build_constituents, compute_equal_weight_return, prepare_universe_asof
 from zoo_index.outputs import (
     compute_changes,
     compute_suspected_noise,
@@ -18,6 +18,7 @@ from zoo_index.outputs import (
     generate_badges,
     generate_index_html,
     generate_latest_json,
+    load_nav,
     save_constituents,
     save_changes,
     save_holdings,
@@ -36,6 +37,8 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="回填时写每日持仓快照",
     )
+    parser.add_argument("--no-cache", action="store_true", help="不使用本地缓存")
+    parser.add_argument("--force-refresh", action="store_true", help="忽略缓存并重新拉取")
     return parser.parse_args()
 
 
@@ -72,6 +75,40 @@ def _find_previous_snapshot(data_dir: Path, prefix: str, date: str) -> Path | No
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def _month_first_open_date(
+    client: TushareClient, date: str, cache: dict[str, str]
+) -> str:
+    month_key = date[:6]
+    if month_key in cache:
+        return cache[month_key]
+    start_date = f"{month_key}01"
+    df = client.get_trade_calendar_range(start_date, date)
+    open_days = df[df["is_open"] == 1].copy()
+    if open_days.empty:
+        raise ValueError("no open trading day found")
+    open_days["cal_date"] = open_days["cal_date"].astype(str)
+    first_date = open_days.sort_values("cal_date").iloc[0]["cal_date"]
+    cache[month_key] = first_date
+    return first_date
+
+
+def _get_constituents_for_rebalance(
+    cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]],
+    stock_basic: pd.DataFrame,
+    namechange: pd.DataFrame,
+    rules,
+    rebalance_date: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if rebalance_date in cache:
+        return cache[rebalance_date]
+    universe = prepare_universe_asof(stock_basic, namechange, rebalance_date, rules)
+    strict_df, extended_df = build_constituents(universe, rules)
+    if strict_df.empty or extended_df.empty:
+        raise ValueError("constituents is empty")
+    cache[rebalance_date] = (strict_df, extended_df)
+    return cache[rebalance_date]
+
+
 def _build_nav_from_returns(ret_df: pd.DataFrame) -> pd.DataFrame:
     nav_df = ret_df.sort_values("date").copy()
     nav_df["zoo_strict_nav"] = (1 + nav_df["zoo_strict_ret"]).cumprod()
@@ -98,23 +135,30 @@ def _run_backfill(
         print(f"获取交易日历失败：{exc}")
         return 1
 
+    data_dir = repo_root / "data"
+    docs_dir = repo_root / "docs"
+    badges_dir = docs_dir / "badges"
+    _ensure_dirs(data_dir, docs_dir, badges_dir)
+
+    nav_path = docs_dir / "nav.csv"
+    existing_nav = load_nav(nav_path)
+    existing_dates = set(existing_nav["date"]) if not existing_nav.empty else set()
+    missing_dates = [date for date in open_dates if date not in existing_dates]
+    if not missing_dates:
+        print("回填跳过：指定区间已存在，无需更新。")
+        return 0
+
     try:
         stock_basic = client.get_stock_basic()
     except Exception as exc:
         print(f"获取股票列表失败：{exc}")
         return 1
 
-    universe = prepare_universe(stock_basic, rules)
-    strict_df, extended_df = build_constituents(universe, rules)
-
-    if strict_df.empty or extended_df.empty:
-        print("成分股为空，请检查规则配置或股票列表。")
+    try:
+        namechange = client.get_namechange()
+    except Exception as exc:
+        print(f"获取历史简称失败：{exc}")
         return 1
-
-    data_dir = repo_root / "data"
-    docs_dir = repo_root / "docs"
-    badges_dir = docs_dir / "badges"
-    _ensure_dirs(data_dir, docs_dir, badges_dir)
 
     ret_rows: list[dict] = []
     last_date = ""
@@ -122,8 +166,25 @@ def _run_backfill(
     last_extended_holdings = pd.DataFrame()
     last_strict_stats = None
     last_extended_stats = None
+    last_strict_constituents = pd.DataFrame()
+    last_extended_constituents = pd.DataFrame()
+    month_cache: dict[str, str] = {}
+    constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
 
-    for trade_date in open_dates:
+    for trade_date in missing_dates:
+        try:
+            rebalance_date = _month_first_open_date(client, trade_date, month_cache)
+            strict_df, extended_df = _get_constituents_for_rebalance(
+                constituents_cache,
+                stock_basic,
+                namechange,
+                rules,
+                rebalance_date,
+            )
+        except Exception as exc:
+            print(f"获取成分股失败({trade_date})：{exc}")
+            return 1
+
         try:
             daily_prices = client.get_daily(trade_date)
         except Exception as exc:
@@ -180,6 +241,8 @@ def _run_backfill(
         last_extended_holdings = extended_holdings
         last_strict_stats = strict_stats
         last_extended_stats = extended_stats
+        last_strict_constituents = strict_df
+        last_extended_constituents = extended_df
 
         print(
             "回填："
@@ -187,14 +250,25 @@ def _run_backfill(
             f"扩展 {extended_ret:.4%}，沪深300 {hs300_ret:.4%}。"
         )
 
-    nav_df = _build_nav_from_returns(pd.DataFrame(ret_rows))
-    nav_path = data_dir / "nav.csv"
+    existing_returns = (
+        existing_nav[["date", "zoo_strict_ret", "zoo_extended_ret", "hs300_ret"]]
+        if not existing_nav.empty
+        else pd.DataFrame()
+    )
+    combined_returns = pd.concat([existing_returns, pd.DataFrame(ret_rows)], ignore_index=True)
+    combined_returns = combined_returns.drop_duplicates(subset=["date"], keep="last")
+    if combined_returns.empty:
+        print("回填失败，缺少收益数据。")
+        return 1
+    nav_df = _build_nav_from_returns(combined_returns)
     nav_df.to_csv(nav_path, index=False)
     latest = nav_df.iloc[-1]
 
     if last_date:
         constituents_path = data_dir / f"constituents_{last_date}.csv"
-        today_constituents = save_constituents(constituents_path, strict_df, extended_df)
+        today_constituents = save_constituents(
+            constituents_path, last_strict_constituents, last_extended_constituents
+        )
 
         holdings_path = data_dir / f"holdings_{last_date}.csv"
         save_holdings(holdings_path, last_strict_holdings, last_extended_holdings)
@@ -217,7 +291,10 @@ def _run_backfill(
     if last_strict_stats is None or last_extended_stats is None:
         print("回填失败，缺少统计数据。")
         return 1
-    generate_index_html(docs_dir / "index.html", latest, last_strict_stats, last_extended_stats)
+    if last_date == latest["date"]:
+        generate_index_html(docs_dir / "index.html", latest, last_strict_stats, last_extended_stats)
+    else:
+        print("回填已补充历史区间，最新日期未变化，跳过主页统计更新。")
 
     print(
         "回填完成："
@@ -245,7 +322,13 @@ def main() -> int:
         return 1
 
     rules = load_rules(rules_path)
-    client = TushareClient(token)
+    cache_dir = repo_root / "data" / "cache"
+    client = TushareClient(
+        token,
+        cache_dir=cache_dir,
+        use_cache=not args.no_cache,
+        force_refresh=args.force_refresh,
+    )
 
     date_arg = args.date.strip()
     if args.backfill > 0:
@@ -291,11 +374,25 @@ def main() -> int:
         print(f"获取股票列表失败：{exc}")
         return 1
 
-    universe = prepare_universe(stock_basic, rules)
-    strict_df, extended_df = build_constituents(universe, rules)
+    try:
+        namechange = client.get_namechange()
+    except Exception as exc:
+        print(f"获取历史简称失败：{exc}")
+        return 1
 
-    if strict_df.empty or extended_df.empty:
-        print("成分股为空，请检查规则配置或股票列表。")
+    month_cache: dict[str, str] = {}
+    constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
+    try:
+        rebalance_date = _month_first_open_date(client, date, month_cache)
+        strict_df, extended_df = _get_constituents_for_rebalance(
+            constituents_cache,
+            stock_basic,
+            namechange,
+            rules,
+            rebalance_date,
+        )
+    except Exception as exc:
+        print(f"获取成分股失败：{exc}")
         return 1
 
     try:
@@ -341,7 +438,7 @@ def main() -> int:
     badges_dir = docs_dir / "badges"
     _ensure_dirs(data_dir, docs_dir, badges_dir)
 
-    nav_path = data_dir / "nav.csv"
+    nav_path = docs_dir / "nav.csv"
     nav_df, latest = update_nav(nav_path, date, strict_ret, extended_ret, hs300_ret)
 
     constituents_path = data_dir / f"constituents_{date}.csv"
