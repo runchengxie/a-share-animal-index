@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import time
 
 import pandas as pd
 import tushare as ts
@@ -17,8 +18,18 @@ class TushareClient:
     def __init__(self, token: str) -> None:
         self._pro = ts.pro_api(token)
 
+    def _trade_cal_with_retry(self, **kwargs) -> pd.DataFrame:
+        last_df = pd.DataFrame()
+        for attempt in range(3):
+            df = self._pro.trade_cal(**kwargs)
+            if not df.empty:
+                return df
+            last_df = df
+            time.sleep(0.5 * (2**attempt))
+        return last_df
+
     def get_trade_calendar(self, date: str) -> TradeCalendarEntry:
-        df = self._pro.trade_cal(
+        df = self._trade_cal_with_retry(
             exchange="",
             start_date=date,
             end_date=date,
@@ -32,7 +43,7 @@ class TushareClient:
     def get_recent_open_date(self, end_date: str, lookback_days: int = 30) -> str:
         end = datetime.strptime(end_date, "%Y%m%d")
         start = end - timedelta(days=lookback_days)
-        df = self._pro.trade_cal(
+        df = self._trade_cal_with_retry(
             exchange="",
             start_date=start.strftime("%Y%m%d"),
             end_date=end_date,
@@ -58,7 +69,7 @@ class TushareClient:
         attempts = 0
         while True:
             start = end - timedelta(days=lookback_days)
-            df = self._pro.trade_cal(
+            df = self._trade_cal_with_retry(
                 exchange="",
                 start_date=start.strftime("%Y%m%d"),
                 end_date=end_date,
@@ -86,16 +97,28 @@ class TushareClient:
         return df.drop_duplicates(subset=["ts_code"])
 
     def get_daily(self, trade_date: str) -> pd.DataFrame:
-        df = self._pro.daily(
-            trade_date=trade_date,
-            fields="ts_code,close,pre_close",
-        )
-        return df
+        last = pd.DataFrame()
+        for attempt in range(5):
+            df = self._pro.daily(
+                trade_date=trade_date,
+                fields="ts_code,close,pre_close",
+            )
+            if not df.empty:
+                return df
+            last = df
+            time.sleep(0.6 * (2**attempt))
+        return last
 
     def get_index_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame:
-        df = self._pro.index_daily(
-            ts_code=ts_code,
-            trade_date=trade_date,
-            fields="ts_code,close,pre_close",
-        )
-        return df
+        last = pd.DataFrame()
+        for attempt in range(5):
+            df = self._pro.index_daily(
+                ts_code=ts_code,
+                trade_date=trade_date,
+                fields="ts_code,close,pre_close",
+            )
+            if not df.empty:
+                return df
+            last = df
+            time.sleep(0.6 * (2**attempt))
+        return last
