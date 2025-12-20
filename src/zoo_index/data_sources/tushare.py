@@ -46,6 +46,38 @@ class TushareClient:
         open_days["cal_date"] = open_days["cal_date"].astype(str)
         return open_days.sort_values("cal_date").iloc[-1]["cal_date"]
 
+    def get_recent_open_dates(
+        self, end_date: str, count: int, lookback_days: int | None = None
+    ) -> list[str]:
+        if count <= 0:
+            raise ValueError("count must be positive")
+        if lookback_days is None:
+            lookback_days = max(count * 2, 60)
+
+        end = datetime.strptime(end_date, "%Y%m%d")
+        attempts = 0
+        while True:
+            start = end - timedelta(days=lookback_days)
+            df = self._pro.trade_cal(
+                exchange="",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end_date,
+                fields="cal_date,is_open",
+            )
+            if df.empty:
+                raise ValueError("trade calendar is empty")
+            open_days = df[df["is_open"] == 1].copy()
+            if open_days.empty:
+                raise ValueError("no open trading day found")
+            open_days["cal_date"] = open_days["cal_date"].astype(str)
+            dates = open_days.sort_values("cal_date")["cal_date"].tolist()
+            if len(dates) >= count:
+                return dates[-count:]
+            attempts += 1
+            if attempts >= 5 or lookback_days >= 3650:
+                raise ValueError("not enough open trading days found")
+            lookback_days *= 2
+
     def get_stock_basic(self) -> pd.DataFrame:
         df = self._pro.stock_basic(
             list_status="L",

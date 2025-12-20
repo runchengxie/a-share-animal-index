@@ -34,6 +34,15 @@ python src/run_daily.py --date 20240102
 
 未指定日期时会默认使用上海时区下最近一个交易日。
 
+4. 回填最近 250 个交易日（可选）
+
+```bash
+python src/run_daily.py --backfill 250
+```
+
+回填会重建 `data/nav.csv` 并刷新 `docs/` 产物，默认只写回填区间最后一天的快照。
+如需生成每日持仓快照，可加 `--backfill-write-snapshots`。
+
 ## 规则配置
 
 `rules.yml` 控制动物词、排除项、强制收编/剔除等规则。

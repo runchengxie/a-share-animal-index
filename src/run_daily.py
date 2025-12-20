@@ -30,6 +30,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--date", type=str, default="", help="交易日 YYYYMMDD")
     parser.add_argument("--rules", type=str, default="", help="规则文件路径")
     parser.add_argument("--token", type=str, default="", help="Tushare Token")
+    parser.add_argument("--backfill", type=int, default=0, help="回填最近N个交易日")
+    parser.add_argument(
+        "--backfill-write-snapshots",
+        action="store_true",
+        help="回填时写每日持仓快照",
+    )
     return parser.parse_args()
 
 
@@ -57,6 +63,163 @@ def _find_previous_snapshot(data_dir: Path, prefix: str, date: str) -> Path | No
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def _build_nav_from_returns(ret_df: pd.DataFrame) -> pd.DataFrame:
+    nav_df = ret_df.sort_values("date").copy()
+    nav_df["zoo_strict_nav"] = (1 + nav_df["zoo_strict_ret"]).cumprod()
+    nav_df["zoo_extended_nav"] = (1 + nav_df["zoo_extended_ret"]).cumprod()
+    nav_df["hs300_nav"] = (1 + nav_df["hs300_ret"]).cumprod()
+    return nav_df
+
+
+def _run_backfill(
+    client: TushareClient,
+    rules,
+    end_date: str,
+    backfill_days: int,
+    repo_root: Path,
+    write_snapshots: bool,
+) -> int:
+    if backfill_days <= 0:
+        print("回填天数必须大于 0。")
+        return 1
+
+    try:
+        open_dates = client.get_recent_open_dates(end_date, backfill_days)
+    except Exception as exc:
+        print(f"获取交易日历失败：{exc}")
+        return 1
+
+    try:
+        stock_basic = client.get_stock_basic()
+    except Exception as exc:
+        print(f"获取股票列表失败：{exc}")
+        return 1
+
+    universe = prepare_universe(stock_basic, rules)
+    strict_df, extended_df = build_constituents(universe, rules)
+
+    if strict_df.empty or extended_df.empty:
+        print("成分股为空，请检查规则配置或股票列表。")
+        return 1
+
+    data_dir = repo_root / "data"
+    docs_dir = repo_root / "docs"
+    badges_dir = docs_dir / "badges"
+    _ensure_dirs(data_dir, docs_dir, badges_dir)
+
+    ret_rows: list[dict] = []
+    last_date = ""
+    last_strict_holdings = pd.DataFrame()
+    last_extended_holdings = pd.DataFrame()
+    last_strict_stats = None
+    last_extended_stats = None
+
+    for trade_date in open_dates:
+        try:
+            daily_prices = client.get_daily(trade_date)
+        except Exception as exc:
+            print(f"获取日行情失败({trade_date})：{exc}")
+            return 1
+
+        if daily_prices.empty:
+            print(f"{trade_date} 日行情为空，无法计算指数。")
+            return 1
+
+        strict_ret, strict_holdings, strict_stats = compute_equal_weight_return(
+            strict_df, daily_prices
+        )
+        extended_ret, extended_holdings, extended_stats = compute_equal_weight_return(
+            extended_df, daily_prices
+        )
+
+        if strict_stats.priced_constituents == 0 or extended_stats.priced_constituents == 0:
+            print(f"{trade_date} 成分股行情为空，无法计算指数。")
+            return 1
+
+        try:
+            hs300_df = client.get_index_daily(trade_date, "000300.SH")
+        except Exception as exc:
+            print(f"获取沪深300行情失败({trade_date})：{exc}")
+            return 1
+
+        if hs300_df.empty:
+            print(f"{trade_date} 沪深300行情为空，无法计算基准。")
+            return 1
+
+        hs300_row = hs300_df.iloc[0]
+        if pd.isna(hs300_row["pre_close"]) or float(hs300_row["pre_close"]) <= 0:
+            print(f"{trade_date} 沪深300前收异常，无法计算基准。")
+            return 1
+
+        hs300_ret = float(hs300_row["close"] / hs300_row["pre_close"] - 1)
+
+        ret_rows.append(
+            {
+                "date": trade_date,
+                "zoo_strict_ret": strict_ret,
+                "zoo_extended_ret": extended_ret,
+                "hs300_ret": hs300_ret,
+            }
+        )
+
+        if write_snapshots:
+            holdings_path = data_dir / f"holdings_{trade_date}.csv"
+            save_holdings(holdings_path, strict_holdings, extended_holdings)
+
+        last_date = trade_date
+        last_strict_holdings = strict_holdings
+        last_extended_holdings = extended_holdings
+        last_strict_stats = strict_stats
+        last_extended_stats = extended_stats
+
+        print(
+            "回填："
+            f"日期 {trade_date}，严格 {strict_ret:.4%}，"
+            f"扩展 {extended_ret:.4%}，沪深300 {hs300_ret:.4%}。"
+        )
+
+    nav_df = _build_nav_from_returns(pd.DataFrame(ret_rows))
+    nav_path = data_dir / "nav.csv"
+    nav_df.to_csv(nav_path, index=False)
+    latest = nav_df.iloc[-1]
+
+    if last_date:
+        constituents_path = data_dir / f"constituents_{last_date}.csv"
+        today_constituents = save_constituents(constituents_path, strict_df, extended_df)
+
+        holdings_path = data_dir / f"holdings_{last_date}.csv"
+        save_holdings(holdings_path, last_strict_holdings, last_extended_holdings)
+
+        previous_constituents_path = _find_previous_snapshot(data_dir, "constituents", last_date)
+        previous_constituents = (
+            pd.read_csv(previous_constituents_path)
+            if previous_constituents_path
+            else pd.DataFrame()
+        )
+
+        changes = compute_changes(today_constituents, previous_constituents)
+        suspected_noise = compute_suspected_noise(today_constituents)
+        changes_path = data_dir / f"changes_{last_date}.json"
+        save_changes(changes_path, last_date, changes, suspected_noise)
+
+    generate_latest_json(docs_dir / "latest.json", latest)
+    generate_badges(badges_dir, latest)
+    generate_chart(docs_dir / "chart.png", nav_df)
+    if last_strict_stats is None or last_extended_stats is None:
+        print("回填失败，缺少统计数据。")
+        return 1
+    generate_index_html(docs_dir / "index.html", latest, last_strict_stats, last_extended_stats)
+
+    print(
+        "回填完成："
+        f"{len(nav_df)} 个交易日，最新 {latest['date']}，"
+        f"严格 {latest['zoo_strict_nav']:.4f}，"
+        f"扩展 {latest['zoo_extended_nav']:.4f}，"
+        f"沪深300 {latest['hs300_nav']:.4f}。"
+    )
+    return 0
+
+
 def main() -> int:
     args = _parse_args()
     repo_root = Path(__file__).resolve().parents[1]
@@ -76,6 +239,24 @@ def main() -> int:
     client = TushareClient(token)
 
     date_arg = args.date.strip()
+    if args.backfill > 0:
+        if date_arg:
+            end_date = date_arg
+        else:
+            try:
+                end_date = client.get_recent_open_date(_current_shanghai_date())
+            except Exception as exc:
+                print(f"获取最近交易日失败：{exc}")
+                return 1
+        return _run_backfill(
+            client,
+            rules,
+            end_date,
+            args.backfill,
+            repo_root,
+            args.backfill_write_snapshots,
+        )
+
     if date_arg:
         date = date_arg
     else:
