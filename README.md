@@ -1,1 +1,84 @@
-# a-share-animal-index
+# A股动物园指数
+
+一个带点娱乐精神的“动物园指数”项目：把A股简称里含动物词的股票收编成组合，按固定规则每日更新，并与沪深300对比。
+
+![动物园指数曲线](docs/chart.png)
+
+说明：图像由每日脚本生成，初次运行后才会显示。
+
+## 功能概览
+
+- 支持“严格动物园 / 扩展动物园”双指数
+- 使用规则词表 + 黑白名单，结果可复现
+- 每日生成净值、曲线图、徽章数据与静态页面
+
+## 快速开始
+
+1. 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+2. 配置 Tushare Token
+
+```bash
+export TUSHARE_TOKEN=你的token
+```
+
+3. 运行每日更新
+
+```bash
+python src/run_daily.py --date 20240102
+```
+
+未指定日期时会默认使用当天日期。
+
+## 规则配置
+
+`rules.yml` 控制动物词、排除项、强制收编/剔除等规则。
+
+- `strict_keywords`：明确动物词（严格动物园）
+- `extended_keywords`：扩展词（扩展动物园，可能噪声更高）
+- `exclude_patterns`：包含这些词的简称会被剔除
+- `force_include / force_exclude`：按股票代码或完整简称强制处理
+
+严格动物园是更保守的版本，扩展动物园更热闹，但更可能出现误伤。
+
+## 产物说明
+
+- `data/nav.csv`：净值与每日收益
+- `data/holdings_YYYYMMDD.csv`：当日成分与权重
+- `data/changes_YYYYMMDD.json`：成分变化摘要
+- `docs/chart.png`：净值对比曲线
+- `docs/latest.json`：徽章/首页数据
+- `docs/index.html`：静态页面（可用于 GitHub Pages）
+
+## 徽章展示（可选）
+
+如果你启用了 GitHub Pages（指向 `docs/`），可以用 shields.io 读取 `latest.json` 做徽章：  
+
+```text
+https://img.shields.io/endpoint?url=https://<user>.github.io/<repo>/latest.json
+```
+
+然后把需要展示的字段映射成徽章内容（如 `zoo_strict_nav`）。也可以在 Pages 页面里直接展示 `docs/latest.json` 的数值。
+
+## 方法备注
+
+- 当前版本以“当日简称”判定成分，历史回测需要配合 `namechange` / `bak_basic` 等历史数据。
+- 默认等权，遇到缺少行情的成分会自动剔除并重新归一化权重。
+
+## GitHub Actions（可选）
+
+可以在 GitHub Actions 中设置每日跑一次，更新 `docs/` 与 `data/` 并提交回仓库，用于 Pages 展示。
+
+仓库内已包含 `/.github/workflows/daily.yml`，你只需要：
+
+1. 在仓库 Secrets 里添加 `TUSHARE_TOKEN`  
+2. 确保 Pages 指向 `docs/` 目录  
+3. 了解 cron 使用 UTC（示例为北京时间 16:10）
+
+## 免责声明
+
+本项目仅为娱乐用途，不构成任何投资建议。

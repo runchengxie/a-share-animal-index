@@ -1,0 +1,65 @@
+# Strict keywords prefer explicit animal terms to reduce false positives.
+strict_keywords:
+  - 熊猫
+  - 海豚
+  - 海鸥
+  - 白鹤
+  - 天鹅
+  - 仙鹤
+  - 金龙鱼
+  - 海马
+  - 海象
+  - 猛虎
+  - 雄鹰
+  - 飞鹰
+  - 蝴蝶
+  - 蜻蜓
+  - 斑马
+  - 蜘蛛
+  - 松鼠
+  - 猫头鹰
+  - 鹦鹉
+  - 蜜蜂
+
+# Extended keywords add single-character or generic animals; expect more noise.
+extended_keywords:
+  - 龙
+  - 马
+  - 牛
+  - 鱼
+  - 鸟
+  - 鹰
+  - 虎
+  - 猫
+  - 狗
+  - 狼
+  - 蛇
+  - 蝎
+  - 豹
+  - 象
+  - 猴
+  - 猪
+  - 鹏
+  - 鹤
+  - 龟
+  - 熊
+  - 鹅
+  - 鸭
+  - 鹿
+  - 兔
+  - 蜂
+  - 蝶
+  - 豚
+  - 鲨
+
+exclude_patterns:
+  - 马钢
+  - 龙湖
+  - 龙光
+
+# Force include/exclude by ts_code or exact name.
+force_include: []
+force_exclude: []
+
+exclude_st: true
+allow_beijing: false
