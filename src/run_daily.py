@@ -43,6 +43,15 @@ def _current_shanghai_date() -> str:
     return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
 
 
+def _print_recent_open_date_error(end_date: str, exc: Exception) -> None:
+    print(f"获取最近交易日失败：{exc}")
+    print(
+        "提示：如果系统时间不准确或指定日期太新，"
+        f"请用 --date 指定一个已存在数据的交易日（当前为 {end_date}），"
+        "例如 --date 20240102。"
+    )
+
+
 def _ensure_dirs(*paths: Path) -> None:
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
@@ -246,7 +255,7 @@ def main() -> int:
             try:
                 end_date = client.get_recent_open_date(_current_shanghai_date())
             except Exception as exc:
-                print(f"获取最近交易日失败：{exc}")
+                _print_recent_open_date_error(_current_shanghai_date(), exc)
                 return 1
         return _run_backfill(
             client,
@@ -263,7 +272,7 @@ def main() -> int:
         try:
             date = client.get_recent_open_date(_current_shanghai_date())
         except Exception as exc:
-            print(f"获取最近交易日失败：{exc}")
+            _print_recent_open_date_error(_current_shanghai_date(), exc)
             return 1
 
     try:
