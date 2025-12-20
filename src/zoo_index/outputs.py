@@ -9,6 +9,12 @@ import pandas as pd
 from .index import IndexStats
 
 
+def _variant_slice(df: pd.DataFrame, variant: str) -> pd.DataFrame:
+    if df.empty or "variant" not in df.columns:
+        return df.iloc[0:0]
+    return df[df["variant"] == variant]
+
+
 def load_nav(nav_path: Path) -> pd.DataFrame:
     if not nav_path.exists():
         return pd.DataFrame()
@@ -64,21 +70,30 @@ def save_holdings(path: Path, strict_holdings: pd.DataFrame, extended_holdings: 
     return combined
 
 
-def compute_changes(today: pd.DataFrame, previous: pd.DataFrame) -> dict:
-    def _variant_slice(df: pd.DataFrame, variant: str) -> pd.DataFrame:
-        if df.empty or "variant" not in df.columns:
-            return df.iloc[0:0]
-        return df[df["variant"] == variant]
+def save_constituents(
+    path: Path, strict_constituents: pd.DataFrame, extended_constituents: pd.DataFrame
+) -> pd.DataFrame:
+    strict = strict_constituents.copy()
+    strict["variant"] = "strict"
+    extended = extended_constituents.copy()
+    extended["variant"] = "extended"
+    combined = pd.concat([strict, extended], ignore_index=True)
+    combined.to_csv(path, index=False)
+    return combined
 
+
+def compute_changes(today: pd.DataFrame, previous: pd.DataFrame) -> dict:
     def _variant_changes(variant: str) -> dict:
         today_slice = _variant_slice(today, variant)
         prev_slice = _variant_slice(previous, variant)
-        today_set = set(today_slice["ts_code"])
-        prev_set = set(prev_slice["ts_code"])
+        today_set = set(today_slice["ts_code"]) if "ts_code" in today_slice.columns else set()
+        prev_set = set(prev_slice["ts_code"]) if "ts_code" in prev_slice.columns else set()
         new_codes = today_set - prev_set
         removed_codes = prev_set - today_set
 
         def _to_records(df: pd.DataFrame, codes: set[str]) -> list[dict]:
+            if not codes or "ts_code" not in df.columns or "name" not in df.columns:
+                return []
             filtered = df[df["ts_code"].isin(codes)][["ts_code", "name"]]
             return filtered.drop_duplicates().to_dict(orient="records")
 
@@ -93,8 +108,32 @@ def compute_changes(today: pd.DataFrame, previous: pd.DataFrame) -> dict:
     }
 
 
-def save_changes(path: Path, date: str, changes: dict) -> None:
+def compute_suspected_noise(constituents: pd.DataFrame) -> dict:
+    def _variant_noise(variant: str) -> list[dict]:
+        slice_df = _variant_slice(constituents, variant)
+        if slice_df.empty or "keyword" not in slice_df.columns:
+            return []
+        keyword = slice_df["keyword"].fillna("").astype(str)
+        mask = keyword.str.len() == 1
+        if "forced" in slice_df.columns:
+            mask &= ~slice_df["forced"].fillna(False).astype(bool)
+        filtered = slice_df[mask]
+        return (
+            filtered[["ts_code", "name", "keyword"]]
+            .drop_duplicates()
+            .to_dict(orient="records")
+        )
+
+    return {
+        "strict": _variant_noise("strict"),
+        "extended": _variant_noise("extended"),
+    }
+
+
+def save_changes(path: Path, date: str, changes: dict, suspected_noise: dict | None = None) -> None:
     payload = {"date": date, "changes": changes}
+    if suspected_noise is not None:
+        payload["suspected_noise"] = suspected_noise
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -115,6 +154,29 @@ def generate_latest_json(path: Path, latest: pd.Series) -> None:
         ),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def generate_badges(badges_dir: Path, latest: pd.Series) -> None:
+    badges_dir.mkdir(parents=True, exist_ok=True)
+    items = [
+        ("zoo_strict_nav", "Zoo Strict NAV", f"{latest['zoo_strict_nav']:.4f}", "2f855a"),
+        (
+            "zoo_extended_nav",
+            "Zoo Extended NAV",
+            f"{latest['zoo_extended_nav']:.4f}",
+            "c05621",
+        ),
+        ("hs300_nav", "HS300 NAV", f"{latest['hs300_nav']:.4f}", "3182ce"),
+    ]
+    for name, label, message, color in items:
+        payload = {
+            "schemaVersion": 1,
+            "label": label,
+            "message": message,
+            "color": color,
+        }
+        path = badges_dir / f"{name}.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def generate_chart(path: Path, nav_df: pd.DataFrame) -> None:
@@ -268,6 +330,7 @@ def generate_index_html(
     </section>
     <section class="notes">
       <p>说明：严格动物园仅收录明确动物词汇，扩展动物园包含单字动物/神兽词，噪声更高但更热闹。</p>
+      <p>净值为价格指数口径，未做分红送转调整。</p>
     </section>
   </main>
 </body>

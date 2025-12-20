@@ -32,7 +32,7 @@ export TUSHARE_TOKEN=你的token
 python src/run_daily.py --date 20240102
 ```
 
-未指定日期时会默认使用当天日期。
+未指定日期时会默认使用上海时区下最近一个交易日。
 
 ## 规则配置
 
@@ -48,26 +48,38 @@ python src/run_daily.py --date 20240102
 ## 产物说明
 
 - `data/nav.csv`：净值与每日收益
+- `data/constituents_YYYYMMDD.csv`：当日成分（不含行情过滤）
 - `data/holdings_YYYYMMDD.csv`：当日成分与权重
-- `data/changes_YYYYMMDD.json`：成分变化摘要
+- `data/changes_YYYYMMDD.json`：成分变化摘要（基于 constituents，含单字词疑似误伤清单）
 - `docs/chart.png`：净值对比曲线
-- `docs/latest.json`：徽章/首页数据
+- `docs/latest.json`：首页数据
+- `docs/badges/*.json`：徽章专用 JSON
 - `docs/index.html`：静态页面（可用于 GitHub Pages）
 
 ## 徽章展示（可选）
 
-如果你启用了 GitHub Pages（指向 `docs/`），可以用 shields.io 读取 `latest.json` 做徽章：  
+如果你启用了 GitHub Pages（指向 `docs/`），可以用 shields.io 读取徽章 JSON：  
 
 ```text
-https://img.shields.io/endpoint?url=https://<user>.github.io/<repo>/latest.json
+https://img.shields.io/endpoint?url=https://<user>.github.io/<repo>/badges/zoo_strict_nav.json
 ```
 
-然后把需要展示的字段映射成徽章内容（如 `zoo_strict_nav`）。也可以在 Pages 页面里直接展示 `docs/latest.json` 的数值。
+也可以在 Pages 页面里直接展示 `docs/latest.json` 的数值。
 
 ## 方法备注
 
 - 当前版本以“当日简称”判定成分，历史回测需要配合 `namechange` / `bak_basic` 等历史数据。
-- 默认等权，遇到缺少行情的成分会自动剔除并重新归一化权重。
+- 当前净值为价格指数口径，未做分红送转调整。
+- 默认等权，遇到缺少行情的成分会自动剔除并重新归一化权重；成分变更以 constituents 为准。
+
+## 开发与测试
+
+安装开发依赖并运行测试：
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 ## GitHub Actions（可选）
 

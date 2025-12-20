@@ -4,6 +4,7 @@ import argparse
 import os
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -12,9 +13,12 @@ from zoo_index.data_sources.tushare import TushareClient
 from zoo_index.index import build_constituents, compute_equal_weight_return, prepare_universe
 from zoo_index.outputs import (
     compute_changes,
+    compute_suspected_noise,
     generate_chart,
+    generate_badges,
     generate_index_html,
     generate_latest_json,
+    save_constituents,
     save_changes,
     save_holdings,
     update_nav,
@@ -29,8 +33,8 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _today() -> str:
-    return datetime.now().strftime("%Y%m%d")
+def _current_shanghai_date() -> str:
+    return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
 
 
 def _ensure_dirs(*paths: Path) -> None:
@@ -38,14 +42,14 @@ def _ensure_dirs(*paths: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def _find_previous_holdings(data_dir: Path, date: str) -> Path | None:
+def _find_previous_snapshot(data_dir: Path, prefix: str, date: str) -> Path | None:
     candidates: list[tuple[str, Path]] = []
-    for path in data_dir.glob("holdings_*.csv"):
+    prefix_value = f"{prefix}_"
+    for path in data_dir.glob(f"{prefix}_*.csv"):
         stem = path.stem
-        parts = stem.split("_")
-        if len(parts) != 2:
+        if not stem.startswith(prefix_value):
             continue
-        file_date = parts[1]
+        file_date = stem[len(prefix_value) :]
         if file_date.isdigit() and file_date < date:
             candidates.append((file_date, path))
     if not candidates:
@@ -57,7 +61,6 @@ def main() -> int:
     args = _parse_args()
     repo_root = Path(__file__).resolve().parents[1]
 
-    date = args.date.strip() or _today()
     rules_path = Path(args.rules).resolve() if args.rules else repo_root / "rules.yml"
     token = args.token.strip() or os.getenv("TUSHARE_TOKEN", "").strip()
 
@@ -71,6 +74,16 @@ def main() -> int:
 
     rules = load_rules(rules_path)
     client = TushareClient(token)
+
+    date_arg = args.date.strip()
+    if date_arg:
+        date = date_arg
+    else:
+        try:
+            date = client.get_recent_open_date(_current_shanghai_date())
+        except Exception as exc:
+            print(f"获取最近交易日失败：{exc}")
+            return 1
 
     try:
         calendar = client.get_trade_calendar(date)
@@ -135,24 +148,32 @@ def main() -> int:
 
     data_dir = repo_root / "data"
     docs_dir = repo_root / "docs"
-    _ensure_dirs(data_dir, docs_dir)
+    badges_dir = docs_dir / "badges"
+    _ensure_dirs(data_dir, docs_dir, badges_dir)
 
     nav_path = data_dir / "nav.csv"
     nav_df, latest = update_nav(nav_path, date, strict_ret, extended_ret, hs300_ret)
 
-    holdings_path = data_dir / f"holdings_{date}.csv"
-    today_holdings = save_holdings(holdings_path, strict_holdings, extended_holdings)
+    constituents_path = data_dir / f"constituents_{date}.csv"
+    today_constituents = save_constituents(constituents_path, strict_df, extended_df)
 
-    previous_holdings_path = _find_previous_holdings(data_dir, date)
-    previous_holdings = (
-        pd.read_csv(previous_holdings_path) if previous_holdings_path else pd.DataFrame()
+    holdings_path = data_dir / f"holdings_{date}.csv"
+    save_holdings(holdings_path, strict_holdings, extended_holdings)
+
+    previous_constituents_path = _find_previous_snapshot(data_dir, "constituents", date)
+    previous_constituents = (
+        pd.read_csv(previous_constituents_path)
+        if previous_constituents_path
+        else pd.DataFrame()
     )
 
-    changes = compute_changes(today_holdings, previous_holdings)
+    changes = compute_changes(today_constituents, previous_constituents)
+    suspected_noise = compute_suspected_noise(today_constituents)
     changes_path = data_dir / f"changes_{date}.json"
-    save_changes(changes_path, date, changes)
+    save_changes(changes_path, date, changes, suspected_noise)
 
     generate_latest_json(docs_dir / "latest.json", latest)
+    generate_badges(badges_dir, latest)
     generate_chart(docs_dir / "chart.png", nav_df)
     generate_index_html(docs_dir / "index.html", latest, strict_stats, extended_stats)
 
