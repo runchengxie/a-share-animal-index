@@ -48,6 +48,18 @@ python src/run_daily.py --backfill 250
 如需生成每日持仓快照，可加 `--backfill-write-snapshots`。
 默认启用本地缓存（`data/cache`），可用 `--no-cache` 禁用，`--force-refresh` 强制刷新。
 
+5. 仅重绘图表（不调用 Tushare，可选）
+
+```bash
+python src/redraw_chart.py
+```
+
+如果 `nav.csv` 或输出路径不在默认位置，可用：
+
+```bash
+python src/redraw_chart.py --nav docs/nav.csv --out docs/chart.png
+```
+
 ## 规则配置
 
 `rules.yml` 控制动物词、排除项、强制收编/剔除等规则。
