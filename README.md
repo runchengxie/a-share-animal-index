@@ -19,7 +19,7 @@
 1. 安装依赖
 
 ```bash
-pip install -r requirements.txt
+pip install .
 ```
 
 2. 配置 Tushare Token
@@ -34,14 +34,16 @@ export TUSHARE_TOKEN=你的token
 python src/run_daily.py --date 20240102
 ```
 
-未指定日期时会默认使用上海时区下最近一个交易日。
+未指定日期时会默认使用上海时区下最近一个完整交易日（若当天数据未就绪会回退到上一个交易日）。
 
-4. 回填最近 250 个交易日（可选）
+4. 回填历史区间（可选）
 
 ```bash
 python src/run_daily.py --backfill 250
 ```
 
+也可以直接 `python src/run_daily.py --backfill`，默认回填最近 2 年交易日。
+如需按年份回填，使用 `--backfill-years 2`；需要全量重算区间时加 `--backfill-mode all`。
 回填会增量更新 `docs/nav.csv` 并刷新 `docs/` 产物，默认只写回填区间最后一天的快照。
 如需生成每日持仓快照，可加 `--backfill-write-snapshots`。
 默认启用本地缓存（`data/cache`），可用 `--no-cache` 禁用，`--force-refresh` 强制刷新。
@@ -116,6 +118,12 @@ pytest
 1. 在仓库 Secrets 里添加 `TUSHARE_TOKEN`  
 2. 确保 Pages 指向 `docs/` 目录  
 3. 了解 cron 使用 UTC（示例为北京时间 16:10）
+
+## 待办
+
+* 将每日产物提交从主分支拆分出去（如使用 `gh-pages`），降低提交噪音
+
+* 增加基础 CI（如 ruff + pytest）防止回归
 
 ## 收录规则
 

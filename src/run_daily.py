@@ -25,13 +25,31 @@ from zoo_index.outputs import (
     update_nav,
 )
 
+DEFAULT_BACKFILL_YEARS = 2
+DEFAULT_COMPLETE_LOOKBACK = 10
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="A-share zoo index daily runner")
     parser.add_argument("--date", type=str, default="", help="交易日 YYYYMMDD")
     parser.add_argument("--rules", type=str, default="", help="规则文件路径")
     parser.add_argument("--token", type=str, default="", help="Tushare Token")
-    parser.add_argument("--backfill", type=int, default=0, help="回填最近N个交易日")
+    parser.add_argument(
+        "--backfill",
+        type=int,
+        nargs="?",
+        const=-1,
+        default=None,
+        help="回填最近N个交易日（省略N则默认回填最近2年）",
+    )
+    parser.add_argument("--backfill-years", type=int, default=0, help="回填最近N年（按交易日历）")
+    parser.add_argument(
+        "--backfill-mode",
+        type=str,
+        choices=("missing", "all"),
+        default="missing",
+        help="回填模式：missing补缺，all全量重算",
+    )
     parser.add_argument(
         "--backfill-write-snapshots",
         action="store_true",
@@ -46,13 +64,61 @@ def _current_shanghai_date() -> str:
     return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
 
 
-def _print_recent_open_date_error(end_date: str, exc: Exception) -> None:
-    print(f"获取最近交易日失败：{exc}")
+def _print_recent_complete_date_error(end_date: str, exc: Exception) -> None:
+    print(f"获取最近完整交易日失败：{exc}")
     print(
         "提示：如果系统时间不准确或指定日期太新，"
         f"请用 --date 指定一个已存在数据的交易日（当前为 {end_date}），"
         "例如 --date 20240102。"
     )
+
+
+def _shift_years(date_value: str, years: int) -> str:
+    if years <= 0:
+        raise ValueError("years must be positive")
+    current = datetime.strptime(date_value, "%Y%m%d")
+    target_year = current.year - years
+    try:
+        shifted = current.replace(year=target_year)
+    except ValueError:
+        shifted = current.replace(year=target_year, month=2, day=28)
+    return shifted.strftime("%Y%m%d")
+
+
+def _get_open_dates_in_range(
+    client: TushareClient, start_date: str, end_date: str
+) -> list[str]:
+    df = client.get_trade_calendar_range(start_date, end_date)
+    open_days = df[df["is_open"] == 1].copy()
+    if open_days.empty:
+        return []
+    open_days["cal_date"] = open_days["cal_date"].astype(str)
+    return open_days.sort_values("cal_date")["cal_date"].tolist()
+
+
+def _is_trade_data_ready(client: TushareClient, trade_date: str) -> bool:
+    daily = client.get_daily(trade_date)
+    if daily.empty:
+        return False
+    hs300_df = client.get_index_daily(trade_date, "000300.SH")
+    if hs300_df.empty:
+        return False
+    hs300_row = hs300_df.iloc[0]
+    if pd.isna(hs300_row["pre_close"]) or float(hs300_row["pre_close"]) <= 0:
+        return False
+    return True
+
+
+def _resolve_recent_complete_date(
+    client: TushareClient,
+    end_date: str,
+    lookback_open_days: int = DEFAULT_COMPLETE_LOOKBACK,
+) -> str:
+    open_dates = client.get_recent_open_dates(end_date, lookback_open_days)
+    for trade_date in reversed(open_dates):
+        if _is_trade_data_ready(client, trade_date):
+            return trade_date
+    raise ValueError("no complete trading day found")
 
 
 def _ensure_dirs(*paths: Path) -> None:
@@ -120,19 +186,14 @@ def _build_nav_from_returns(ret_df: pd.DataFrame) -> pd.DataFrame:
 def _run_backfill(
     client: TushareClient,
     rules,
-    end_date: str,
-    backfill_days: int,
+    target_dates: list[str],
     repo_root: Path,
     write_snapshots: bool,
+    backfill_mode: str,
 ) -> int:
-    if backfill_days <= 0:
-        print("回填天数必须大于 0。")
-        return 1
-
-    try:
-        open_dates = client.get_recent_open_dates(end_date, backfill_days)
-    except Exception as exc:
-        print(f"获取交易日历失败：{exc}")
+    target_dates = sorted(set(target_dates))
+    if not target_dates:
+        print("回填区间为空，未找到交易日。")
         return 1
 
     data_dir = repo_root / "data"
@@ -143,10 +204,13 @@ def _run_backfill(
     nav_path = docs_dir / "nav.csv"
     existing_nav = load_nav(nav_path)
     existing_dates = set(existing_nav["date"]) if not existing_nav.empty else set()
-    missing_dates = [date for date in open_dates if date not in existing_dates]
-    if not missing_dates:
-        print("回填跳过：指定区间已存在，无需更新。")
-        return 0
+    if backfill_mode == "missing":
+        run_dates = [date for date in target_dates if date not in existing_dates]
+        if not run_dates:
+            print("回填跳过：指定区间已存在，无需更新。")
+            return 0
+    else:
+        run_dates = target_dates
 
     try:
         stock_basic = client.get_stock_basic()
@@ -171,7 +235,7 @@ def _run_backfill(
     month_cache: dict[str, str] = {}
     constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
 
-    for trade_date in missing_dates:
+    for trade_date in run_dates:
         try:
             rebalance_date = _month_first_open_date(client, trade_date, month_cache)
             strict_df, extended_df = _get_constituents_for_rebalance(
@@ -331,31 +395,67 @@ def main() -> int:
     )
 
     date_arg = args.date.strip()
-    if args.backfill > 0:
+    backfill_days = 0
+    backfill_years = 0
+    backfill_requested = False
+
+    if args.backfill_years < 0:
+        print("回填年份必须大于 0。")
+        return 1
+    if args.backfill_years > 0:
+        backfill_requested = True
+        backfill_years = args.backfill_years
+
+    if args.backfill is not None:
+        backfill_requested = True
+        if args.backfill == -1:
+            if backfill_years > 0:
+                print("请勿同时指定 --backfill 和 --backfill-years。")
+                return 1
+            backfill_years = DEFAULT_BACKFILL_YEARS
+        elif args.backfill > 0:
+            if backfill_years > 0:
+                print("请勿同时指定 --backfill 和 --backfill-years。")
+                return 1
+            backfill_days = args.backfill
+        else:
+            print("回填天数必须大于 0。")
+            return 1
+
+    if backfill_requested:
         if date_arg:
             end_date = date_arg
         else:
             try:
-                end_date = client.get_recent_open_date(_current_shanghai_date())
+                end_date = _resolve_recent_complete_date(client, _current_shanghai_date())
             except Exception as exc:
-                _print_recent_open_date_error(_current_shanghai_date(), exc)
+                _print_recent_complete_date_error(_current_shanghai_date(), exc)
                 return 1
+        try:
+            if backfill_years > 0:
+                start_date = _shift_years(end_date, backfill_years)
+                open_dates = _get_open_dates_in_range(client, start_date, end_date)
+            else:
+                open_dates = client.get_recent_open_dates(end_date, backfill_days)
+        except Exception as exc:
+            print(f"获取交易日历失败：{exc}")
+            return 1
         return _run_backfill(
             client,
             rules,
-            end_date,
-            args.backfill,
+            open_dates,
             repo_root,
             args.backfill_write_snapshots,
+            args.backfill_mode,
         )
 
     if date_arg:
         date = date_arg
     else:
         try:
-            date = client.get_recent_open_date(_current_shanghai_date())
+            date = _resolve_recent_complete_date(client, _current_shanghai_date())
         except Exception as exc:
-            _print_recent_open_date_error(_current_shanghai_date(), exc)
+            _print_recent_complete_date_error(_current_shanghai_date(), exc)
             return 1
 
     try:
@@ -367,6 +467,19 @@ def main() -> int:
     if not calendar.is_open:
         print(f"{date} 非交易日，已跳过。")
         return 0
+
+    data_dir = repo_root / "data"
+    docs_dir = repo_root / "docs"
+    nav_path = docs_dir / "nav.csv"
+    existing_nav = load_nav(nav_path)
+    if not existing_nav.empty:
+        latest_date = max(existing_nav["date"])
+        if date < latest_date:
+            print(
+                f"{date} 早于现有净值最新日期 {latest_date}，"
+                "请使用回填模式重算历史区间。"
+            )
+            return 1
 
     try:
         stock_basic = client.get_stock_basic()
@@ -433,12 +546,9 @@ def main() -> int:
 
     hs300_ret = float(hs300_row["close"] / hs300_row["pre_close"] - 1)
 
-    data_dir = repo_root / "data"
-    docs_dir = repo_root / "docs"
     badges_dir = docs_dir / "badges"
     _ensure_dirs(data_dir, docs_dir, badges_dir)
 
-    nav_path = docs_dir / "nav.csv"
     nav_df, latest = update_nav(nav_path, date, strict_ret, extended_ret, hs300_ret)
 
     constituents_path = data_dir / f"constituents_{date}.csv"

@@ -6,7 +6,13 @@ build-backend = "setuptools.build_meta"
 name = "a-share-animal-index"
 version = "0.1.0"
 requires-python = ">=3.10"
-dynamic = ["dependencies"]
+dependencies = [
+  "pandas",
+  "pyarrow",
+  "pyyaml",
+  "tushare",
+  "matplotlib",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -17,9 +23,6 @@ dev = [
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.packages.find]
 where = ["src"]
