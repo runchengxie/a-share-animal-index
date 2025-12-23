@@ -183,22 +183,28 @@ def generate_chart(path: Path, nav_df: pd.DataFrame) -> None:
     if nav_df.empty:
         return
 
-    nav_df = nav_df.sort_values("date")
-    dates = nav_df["date"].tolist()
+    nav_df = nav_df.sort_values("date").copy()
+    dates = pd.to_datetime(nav_df["date"], format="%Y%m%d")
 
-    plt.figure(figsize=(10, 6))
-    line_kwargs = {"marker": "o", "markersize": 3}
-    plt.plot(dates, nav_df["zoo_strict_nav"], label="Zoo Strict", **line_kwargs)
-    plt.plot(dates, nav_df["zoo_extended_nav"], label="Zoo Extended", **line_kwargs)
-    plt.plot(dates, nav_df["hs300_nav"], label="HS300", **line_kwargs)
-    plt.xlabel("Date")
-    plt.ylabel("NAV")
-    plt.title("A-share Zoo Index")
-    plt.legend()
-    plt.grid(True, linestyle="--", alpha=0.4)
-    plt.tight_layout()
-    plt.savefig(path, dpi=150)
-    plt.close()
+    import matplotlib.dates as mdates
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(dates, nav_df["zoo_strict_nav"], label="Zoo Strict", linewidth=1.6)
+    ax.plot(dates, nav_df["zoo_extended_nav"], label="Zoo Extended", linewidth=1.6)
+    ax.plot(dates, nav_df["hs300_nav"], label="HS300", linewidth=1.6)
+
+    locator = mdates.AutoDateLocator(minticks=6, maxticks=10)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+
+    ax.set_xlabel("Date")
+    ax.set_ylabel("NAV")
+    ax.set_title("A-share Zoo Index")
+    ax.legend()
+    ax.grid(True, axis="y", linestyle="--", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
 
 
 def generate_index_html(
