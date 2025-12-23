@@ -120,7 +120,7 @@ ts_code,name,keyword,forced,variant
 600775.SH,南京熊猫,熊猫,False,extended
 600810.SH,神马股份,马,False,extended
 600853.SH,龙建股份,龙,False,extended
-600993.SH,马应龙,龙,False,extended
+600993.SH,马应龙,马,False,extended
 601015.SH,陕西黑猫,猫,False,extended
 601188.SH,龙江交通,龙,False,extended
 601828.SH,美凯龙,龙,False,extended
@@ -143,7 +143,7 @@ ts_code,name,keyword,forced,variant
 603488.SH,展鹏科技,鹏,False,extended
 603530.SH,神马电力,马,False,extended
 603668.SH,天马科技,马,False,extended
-603686.SH,福龙马,龙,False,extended
+603686.SH,福龙马,马,False,extended
 603729.SH,龙韵股份,龙,False,extended
 603733.SH,仙鹤股份,仙鹤,False,extended
 603767.SH,中马传动,马,False,extended
