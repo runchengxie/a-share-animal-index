@@ -18,16 +18,13 @@ class MatchResult:
     forced: bool
 
 
-def _split_force_items(items: Iterable[str]) -> tuple[set[str], set[str]]:
+def _split_force_items(items: Iterable[str]) -> set[str]:
     codes: set[str] = set()
-    names: set[str] = set()
     for item in items:
         normalized = item.strip().upper()
         if _TS_CODE_RE.match(normalized):
             codes.add(normalized)
-        else:
-            names.add(item.strip())
-    return codes, names
+    return codes
 
 
 def _sorted_keywords(keywords: Iterable[str]) -> list[str]:
@@ -51,8 +48,8 @@ def _hit_exclude_pattern(name: str, patterns: Iterable[str]) -> bool:
 class Matcher:
     def __init__(self, rules: Rules) -> None:
         self._rules = rules
-        self._include_codes, self._include_names = _split_force_items(rules.force_include)
-        self._exclude_codes, self._exclude_names = _split_force_items(rules.force_exclude)
+        self._include_codes = _split_force_items(rules.force_include)
+        self._exclude_codes = _split_force_items(rules.force_exclude)
         self._strict_keywords = _sorted_keywords(rules.strict_keywords)
         self._extended_keywords = _sorted_keywords(rules.extended_keywords)
 
@@ -60,10 +57,10 @@ class Matcher:
         code = ts_code.upper()
         safe_name = name or ""
 
-        if code in self._exclude_codes or safe_name in self._exclude_names:
+        if code in self._exclude_codes:
             return MatchResult(False, False, None, None, False)
 
-        if code in self._include_codes or safe_name in self._include_names:
+        if code in self._include_codes:
             return MatchResult(True, True, "forced", "forced", True)
 
         if _hit_exclude_pattern(safe_name, self._rules.exclude_patterns):

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -25,8 +27,20 @@ from zoo_index.outputs import (
     update_nav,
 )
 
-DEFAULT_BACKFILL_YEARS = 2
+DEFAULT_BACKFILL_YEARS = 5
 DEFAULT_COMPLETE_LOOKBACK = 10
+DEFAULT_BENCHMARK_CODE = "510300.SH"
+DEFAULT_BENCHMARK_SOURCE = "fund"
+DEFAULT_BENCHMARK_LABEL = "HS300 ETF"
+DEFAULT_INDEX_BENCHMARK_CODE = "000300.SH"
+DEFAULT_INDEX_BENCHMARK_LABEL = "HS300"
+
+
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    code: str
+    source: str
+    label: str
 
 
 def _parse_args() -> argparse.Namespace:
@@ -40,7 +54,7 @@ def _parse_args() -> argparse.Namespace:
         nargs="?",
         const=-1,
         default=None,
-        help="回填最近N个交易日（省略N则默认回填最近2年）",
+        help="回填最近N个交易日（省略N则默认回填最近5年）",
     )
     parser.add_argument("--backfill-years", type=int, default=0, help="回填最近N年（按交易日历）")
     parser.add_argument(
@@ -54,6 +68,30 @@ def _parse_args() -> argparse.Namespace:
         "--backfill-write-snapshots",
         action="store_true",
         help="回填时写每日持仓快照",
+    )
+    parser.add_argument(
+        "--no-rules-snapshot",
+        action="store_true",
+        help="回填时不写规则快照",
+    )
+    parser.add_argument(
+        "--benchmark",
+        type=str,
+        default=DEFAULT_BENCHMARK_CODE,
+        help="基准代码（默认 510300.SH，沪深300ETF）",
+    )
+    parser.add_argument(
+        "--benchmark-source",
+        type=str,
+        choices=("index", "fund", "stock"),
+        default=DEFAULT_BENCHMARK_SOURCE,
+        help="基准数据源：index指数/fund ETF/stock A股",
+    )
+    parser.add_argument(
+        "--benchmark-label",
+        type=str,
+        default="",
+        help="基准展示名称（可选）",
     )
     parser.add_argument("--no-cache", action="store_true", help="不使用本地缓存")
     parser.add_argument("--force-refresh", action="store_true", help="忽略缓存并重新拉取")
@@ -96,34 +134,162 @@ def _get_open_dates_in_range(
     return open_days.sort_values("cal_date")["cal_date"].tolist()
 
 
-def _is_trade_data_ready(client: TushareClient, trade_date: str) -> bool:
+def _is_benchmark_data_ready(
+    client: TushareClient,
+    trade_date: str,
+    benchmark: BenchmarkConfig,
+    daily_prices: pd.DataFrame | None = None,
+) -> bool:
+    if benchmark.source == "index":
+        df = client.get_index_daily(trade_date, benchmark.code)
+        if df.empty:
+            return False
+        row = df.iloc[0]
+    elif benchmark.source == "fund":
+        df = client.get_fund_daily(trade_date, benchmark.code)
+        if df.empty:
+            return False
+        row = df.iloc[0]
+    elif benchmark.source == "stock":
+        if daily_prices is None:
+            daily_prices = client.get_daily(trade_date)
+        row_slice = daily_prices[daily_prices["ts_code"] == benchmark.code]
+        if row_slice.empty:
+            return False
+        row = row_slice.iloc[0]
+    else:
+        raise ValueError(f"unknown benchmark source: {benchmark.source}")
+
+    if pd.isna(row["pre_close"]) or float(row["pre_close"]) <= 0:
+        return False
+    return True
+
+
+def _is_trade_data_ready(
+    client: TushareClient, trade_date: str, benchmark: BenchmarkConfig
+) -> bool:
     daily = client.get_daily(trade_date)
     if daily.empty:
         return False
-    hs300_df = client.get_index_daily(trade_date, "000300.SH")
-    if hs300_df.empty:
-        return False
-    hs300_row = hs300_df.iloc[0]
-    if pd.isna(hs300_row["pre_close"]) or float(hs300_row["pre_close"]) <= 0:
-        return False
-    return True
+    return _is_benchmark_data_ready(client, trade_date, benchmark, daily)
 
 
 def _resolve_recent_complete_date(
     client: TushareClient,
     end_date: str,
+    benchmark: BenchmarkConfig,
     lookback_open_days: int = DEFAULT_COMPLETE_LOOKBACK,
 ) -> str:
     open_dates = client.get_recent_open_dates(end_date, lookback_open_days)
     for trade_date in reversed(open_dates):
-        if _is_trade_data_ready(client, trade_date):
+        if _is_trade_data_ready(client, trade_date, benchmark):
             return trade_date
     raise ValueError("no complete trading day found")
+
+
+def _resolve_previous_open_date(client: TushareClient, trade_date: str) -> str:
+    recent = client.get_recent_open_dates(trade_date, 2)
+    if len(recent) < 2:
+        raise ValueError("not enough open trading days")
+    return recent[-2]
+
+
+def _compute_adjusted_return(
+    close: float,
+    pre_close: float,
+    adj_factor: float,
+    prev_adj_factor: float,
+) -> float:
+    if pre_close <= 0:
+        raise ValueError("pre_close must be positive")
+    if adj_factor <= 0 or prev_adj_factor <= 0:
+        raise ValueError("adj_factor must be positive")
+    return close / pre_close * (adj_factor / prev_adj_factor) - 1
+
+
+def _get_benchmark_return(
+    client: TushareClient,
+    trade_date: str,
+    prev_date: str,
+    benchmark: BenchmarkConfig,
+    daily_prices: pd.DataFrame | None = None,
+    adj_factors: pd.DataFrame | None = None,
+    prev_adj_factors: pd.DataFrame | None = None,
+) -> float:
+    if benchmark.source == "index":
+        df = client.get_index_daily(trade_date, benchmark.code)
+        if df.empty:
+            raise ValueError("基准行情为空")
+        row = df.iloc[0]
+        if pd.isna(row["pre_close"]) or float(row["pre_close"]) <= 0:
+            raise ValueError("基准前收异常")
+        return float(row["close"] / row["pre_close"] - 1)
+
+    if benchmark.source == "fund":
+        df = client.get_fund_daily(trade_date, benchmark.code)
+        if df.empty:
+            raise ValueError("基准行情为空")
+        row = df.iloc[0]
+        if pd.isna(row["pre_close"]) or float(row["pre_close"]) <= 0:
+            raise ValueError("基准前收异常")
+        adj_today = client.get_fund_adj(trade_date, benchmark.code)
+        adj_prev = client.get_fund_adj(prev_date, benchmark.code)
+        if adj_today.empty or adj_prev.empty:
+            raise ValueError("基准复权因子缺失")
+        adj_today_value = adj_today.iloc[0]["adj_factor"]
+        adj_prev_value = adj_prev.iloc[0]["adj_factor"]
+        if pd.isna(adj_today_value) or pd.isna(adj_prev_value):
+            raise ValueError("基准复权因子缺失")
+        return _compute_adjusted_return(
+            float(row["close"]),
+            float(row["pre_close"]),
+            float(adj_today_value),
+            float(adj_prev_value),
+        )
+
+    if benchmark.source == "stock":
+        if daily_prices is None:
+            daily_prices = client.get_daily(trade_date)
+        row_slice = daily_prices[daily_prices["ts_code"] == benchmark.code]
+        if row_slice.empty:
+            raise ValueError("基准行情为空")
+        row = row_slice.iloc[0]
+        if pd.isna(row["pre_close"]) or float(row["pre_close"]) <= 0:
+            raise ValueError("基准前收异常")
+        if adj_factors is None:
+            adj_factors = client.get_adj_factor(trade_date)
+        if prev_adj_factors is None:
+            prev_adj_factors = client.get_adj_factor(prev_date)
+        adj_today = adj_factors[adj_factors["ts_code"] == benchmark.code]
+        adj_prev = prev_adj_factors[prev_adj_factors["ts_code"] == benchmark.code]
+        if adj_today.empty or adj_prev.empty:
+            raise ValueError("基准复权因子缺失")
+        adj_today_value = adj_today.iloc[0]["adj_factor"]
+        adj_prev_value = adj_prev.iloc[0]["adj_factor"]
+        if pd.isna(adj_today_value) or pd.isna(adj_prev_value):
+            raise ValueError("基准复权因子缺失")
+        return _compute_adjusted_return(
+            float(row["close"]),
+            float(row["pre_close"]),
+            float(adj_today_value),
+            float(adj_prev_value),
+        )
+
+    raise ValueError(f"unknown benchmark source: {benchmark.source}")
 
 
 def _ensure_dirs(*paths: Path) -> None:
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
+
+
+def _snapshot_rules(
+    rules_path: Path, data_dir: Path, start_date: str, end_date: str
+) -> Path:
+    timestamp = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")
+    snapshot_path = data_dir / f"rules_snapshot_{start_date}_{end_date}_{timestamp}.yml"
+    shutil.copy2(rules_path, snapshot_path)
+    return snapshot_path
 
 
 def _find_previous_snapshot(data_dir: Path, prefix: str, date: str) -> Path | None:
@@ -186,10 +352,13 @@ def _build_nav_from_returns(ret_df: pd.DataFrame) -> pd.DataFrame:
 def _run_backfill(
     client: TushareClient,
     rules,
+    rules_path: Path,
+    benchmark: BenchmarkConfig,
     target_dates: list[str],
     repo_root: Path,
     write_snapshots: bool,
     backfill_mode: str,
+    snapshot_rules: bool,
 ) -> int:
     target_dates = sorted(set(target_dates))
     if not target_dates:
@@ -211,6 +380,24 @@ def _run_backfill(
             return 0
     else:
         run_dates = target_dates
+
+    if snapshot_rules:
+        snapshot_path = _snapshot_rules(rules_path, data_dir, target_dates[0], target_dates[-1])
+        print(f"回填规则快照已保存：{snapshot_path}")
+
+    prev_date_map: dict[str, str] = {}
+    for idx, date in enumerate(target_dates):
+        if idx == 0:
+            prev_date_map[date] = _resolve_previous_open_date(client, date)
+        else:
+            prev_date_map[date] = target_dates[idx - 1]
+
+    adj_factor_cache: dict[str, pd.DataFrame] = {}
+
+    def _get_adj_factors(date: str) -> pd.DataFrame:
+        if date not in adj_factor_cache:
+            adj_factor_cache[date] = client.get_adj_factor(date)
+        return adj_factor_cache[date]
 
     try:
         stock_basic = client.get_stock_basic()
@@ -259,11 +446,22 @@ def _run_backfill(
             print(f"{trade_date} 日行情为空，无法计算指数。")
             return 1
 
+        prev_date = prev_date_map[trade_date]
+        try:
+            adj_factors = _get_adj_factors(trade_date)
+            prev_adj_factors = _get_adj_factors(prev_date)
+        except Exception as exc:
+            print(f"获取复权因子失败({trade_date})：{exc}")
+            return 1
+        if adj_factors.empty or prev_adj_factors.empty:
+            print(f"{trade_date} 复权因子为空，无法计算指数。")
+            return 1
+
         strict_ret, strict_holdings, strict_stats = compute_equal_weight_return(
-            strict_df, daily_prices
+            strict_df, daily_prices, adj_factors, prev_adj_factors
         )
         extended_ret, extended_holdings, extended_stats = compute_equal_weight_return(
-            extended_df, daily_prices
+            extended_df, daily_prices, adj_factors, prev_adj_factors
         )
 
         if strict_stats.priced_constituents == 0 or extended_stats.priced_constituents == 0:
@@ -271,28 +469,25 @@ def _run_backfill(
             return 1
 
         try:
-            hs300_df = client.get_index_daily(trade_date, "000300.SH")
+            benchmark_ret = _get_benchmark_return(
+                client,
+                trade_date,
+                prev_date,
+                benchmark,
+                daily_prices=daily_prices,
+                adj_factors=adj_factors,
+                prev_adj_factors=prev_adj_factors,
+            )
         except Exception as exc:
-            print(f"获取沪深300行情失败({trade_date})：{exc}")
+            print(f"获取基准行情失败({trade_date})：{exc}")
             return 1
-
-        if hs300_df.empty:
-            print(f"{trade_date} 沪深300行情为空，无法计算基准。")
-            return 1
-
-        hs300_row = hs300_df.iloc[0]
-        if pd.isna(hs300_row["pre_close"]) or float(hs300_row["pre_close"]) <= 0:
-            print(f"{trade_date} 沪深300前收异常，无法计算基准。")
-            return 1
-
-        hs300_ret = float(hs300_row["close"] / hs300_row["pre_close"] - 1)
 
         ret_rows.append(
             {
                 "date": trade_date,
                 "zoo_strict_ret": strict_ret,
                 "zoo_extended_ret": extended_ret,
-                "hs300_ret": hs300_ret,
+                "hs300_ret": benchmark_ret,
             }
         )
 
@@ -311,7 +506,7 @@ def _run_backfill(
         print(
             "回填："
             f"日期 {trade_date}，严格 {strict_ret:.4%}，"
-            f"扩展 {extended_ret:.4%}，沪深300 {hs300_ret:.4%}。"
+            f"扩展 {extended_ret:.4%}，{benchmark.label} {benchmark_ret:.4%}。"
         )
 
     existing_returns = (
@@ -349,14 +544,20 @@ def _run_backfill(
         changes_path = data_dir / f"changes_{last_date}.json"
         save_changes(changes_path, last_date, changes, suspected_noise)
 
-    generate_latest_json(docs_dir / "latest.json", latest)
-    generate_badges(badges_dir, latest)
-    generate_chart(docs_dir / "chart.png", nav_df)
+    generate_latest_json(docs_dir / "latest.json", latest, benchmark.code, benchmark.label)
+    generate_badges(badges_dir, latest, benchmark.label)
+    generate_chart(docs_dir / "chart.png", nav_df, benchmark.label)
     if last_strict_stats is None or last_extended_stats is None:
         print("回填失败，缺少统计数据。")
         return 1
     if last_date == latest["date"]:
-        generate_index_html(docs_dir / "index.html", latest, last_strict_stats, last_extended_stats)
+        generate_index_html(
+            docs_dir / "index.html",
+            latest,
+            last_strict_stats,
+            last_extended_stats,
+            benchmark.label,
+        )
     else:
         print("回填已补充历史区间，最新日期未变化，跳过主页统计更新。")
 
@@ -365,7 +566,7 @@ def _run_backfill(
         f"{len(nav_df)} 个交易日，最新 {latest['date']}，"
         f"严格 {latest['zoo_strict_nav']:.4f}，"
         f"扩展 {latest['zoo_extended_nav']:.4f}，"
-        f"沪深300 {latest['hs300_nav']:.4f}。"
+        f"{benchmark.label} {latest['hs300_nav']:.4f}。"
     )
     return 0
 
@@ -393,6 +594,23 @@ def main() -> int:
         use_cache=not args.no_cache,
         force_refresh=args.force_refresh,
     )
+
+    benchmark_code = args.benchmark.strip().upper()
+    if not benchmark_code:
+        benchmark_code = DEFAULT_BENCHMARK_CODE
+    benchmark_source = args.benchmark_source
+    if benchmark_source == "index" and benchmark_code == DEFAULT_BENCHMARK_CODE:
+        benchmark_code = DEFAULT_INDEX_BENCHMARK_CODE
+
+    if args.benchmark_label.strip():
+        benchmark_label = args.benchmark_label.strip()
+    elif benchmark_source == "fund" and benchmark_code == DEFAULT_BENCHMARK_CODE:
+        benchmark_label = DEFAULT_BENCHMARK_LABEL
+    elif benchmark_source == "index" and benchmark_code == DEFAULT_INDEX_BENCHMARK_CODE:
+        benchmark_label = DEFAULT_INDEX_BENCHMARK_LABEL
+    else:
+        benchmark_label = f"Benchmark {benchmark_code}"
+    benchmark = BenchmarkConfig(benchmark_code, benchmark_source, benchmark_label)
 
     date_arg = args.date.strip()
     backfill_days = 0
@@ -427,7 +645,9 @@ def main() -> int:
             end_date = date_arg
         else:
             try:
-                end_date = _resolve_recent_complete_date(client, _current_shanghai_date())
+                end_date = _resolve_recent_complete_date(
+                    client, _current_shanghai_date(), benchmark
+                )
             except Exception as exc:
                 _print_recent_complete_date_error(_current_shanghai_date(), exc)
                 return 1
@@ -443,17 +663,20 @@ def main() -> int:
         return _run_backfill(
             client,
             rules,
+            rules_path,
+            benchmark,
             open_dates,
             repo_root,
             args.backfill_write_snapshots,
             args.backfill_mode,
+            not args.no_rules_snapshot,
         )
 
     if date_arg:
         date = date_arg
     else:
         try:
-            date = _resolve_recent_complete_date(client, _current_shanghai_date())
+            date = _resolve_recent_complete_date(client, _current_shanghai_date(), benchmark)
         except Exception as exc:
             _print_recent_complete_date_error(_current_shanghai_date(), exc)
             return 1
@@ -518,11 +741,27 @@ def main() -> int:
         print("日行情为空，无法计算指数。")
         return 1
 
+    try:
+        prev_date = _resolve_previous_open_date(client, date)
+    except Exception as exc:
+        print(f"获取前一交易日失败：{exc}")
+        return 1
+
+    try:
+        adj_factors = client.get_adj_factor(date)
+        prev_adj_factors = client.get_adj_factor(prev_date)
+    except Exception as exc:
+        print(f"获取复权因子失败：{exc}")
+        return 1
+    if adj_factors.empty or prev_adj_factors.empty:
+        print("复权因子为空，无法计算指数。")
+        return 1
+
     strict_ret, strict_holdings, strict_stats = compute_equal_weight_return(
-        strict_df, daily_prices
+        strict_df, daily_prices, adj_factors, prev_adj_factors
     )
     extended_ret, extended_holdings, extended_stats = compute_equal_weight_return(
-        extended_df, daily_prices
+        extended_df, daily_prices, adj_factors, prev_adj_factors
     )
 
     if strict_stats.priced_constituents == 0 or extended_stats.priced_constituents == 0:
@@ -530,26 +769,23 @@ def main() -> int:
         return 1
 
     try:
-        hs300_df = client.get_index_daily(date, "000300.SH")
+        benchmark_ret = _get_benchmark_return(
+            client,
+            date,
+            prev_date,
+            benchmark,
+            daily_prices=daily_prices,
+            adj_factors=adj_factors,
+            prev_adj_factors=prev_adj_factors,
+        )
     except Exception as exc:
-        print(f"获取沪深300行情失败：{exc}")
+        print(f"获取基准行情失败：{exc}")
         return 1
-
-    if hs300_df.empty:
-        print("沪深300行情为空，无法计算基准。")
-        return 1
-
-    hs300_row = hs300_df.iloc[0]
-    if pd.isna(hs300_row["pre_close"]) or float(hs300_row["pre_close"]) <= 0:
-        print("沪深300前收异常，无法计算基准。")
-        return 1
-
-    hs300_ret = float(hs300_row["close"] / hs300_row["pre_close"] - 1)
 
     badges_dir = docs_dir / "badges"
     _ensure_dirs(data_dir, docs_dir, badges_dir)
 
-    nav_df, latest = update_nav(nav_path, date, strict_ret, extended_ret, hs300_ret)
+    nav_df, latest = update_nav(nav_path, date, strict_ret, extended_ret, benchmark_ret)
 
     constituents_path = data_dir / f"constituents_{date}.csv"
     today_constituents = save_constituents(constituents_path, strict_df, extended_df)
@@ -569,15 +805,21 @@ def main() -> int:
     changes_path = data_dir / f"changes_{date}.json"
     save_changes(changes_path, date, changes, suspected_noise)
 
-    generate_latest_json(docs_dir / "latest.json", latest)
-    generate_badges(badges_dir, latest)
-    generate_chart(docs_dir / "chart.png", nav_df)
-    generate_index_html(docs_dir / "index.html", latest, strict_stats, extended_stats)
+    generate_latest_json(docs_dir / "latest.json", latest, benchmark.code, benchmark.label)
+    generate_badges(badges_dir, latest, benchmark.label)
+    generate_chart(docs_dir / "chart.png", nav_df, benchmark.label)
+    generate_index_html(
+        docs_dir / "index.html",
+        latest,
+        strict_stats,
+        extended_stats,
+        benchmark.label,
+    )
 
     print(
         "已更新："
         f"日期 {date}，严格 {latest['zoo_strict_nav']:.4f}，"
-        f"扩展 {latest['zoo_extended_nav']:.4f}，沪深300 {latest['hs300_nav']:.4f}。"
+        f"扩展 {latest['zoo_extended_nav']:.4f}，{benchmark.label} {latest['hs300_nav']:.4f}。"
     )
     return 0
 

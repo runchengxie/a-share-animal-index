@@ -31,7 +31,8 @@ export TUSHARE_TOKEN=你的token
 3. 运行每日更新
 
 ```bash
-python src/run_daily.py --date 20240102
+zoo-index --date 20240102
+# 或：python src/run_daily.py --date 20240102
 ```
 
 未指定日期时会默认使用上海时区下最近一个完整交易日（若当天数据未就绪会回退到上一个交易日）。
@@ -39,26 +40,43 @@ python src/run_daily.py --date 20240102
 4. 回填历史区间（可选）
 
 ```bash
-python src/run_daily.py --backfill 250
+zoo-index --backfill 250
+# 或：python src/run_daily.py --backfill 250
 ```
 
-也可以直接 `python src/run_daily.py --backfill`，默认回填最近 2 年交易日。
-如需按年份回填，使用 `--backfill-years 2`；需要全量重算区间时加 `--backfill-mode all`。
+也可以直接 `zoo-index --backfill`，默认回填最近 5 年交易日。
+如需按年份回填，使用 `--backfill-years 5`；需要全量重算区间时加 `--backfill-mode all`。
 回填会增量更新 `docs/nav.csv` 并刷新 `docs/` 产物，默认只写回填区间最后一天的快照。
 如需生成每日持仓快照，可加 `--backfill-write-snapshots`。
+如需禁用规则快照，可加 `--no-rules-snapshot`。
 默认启用本地缓存（`data/cache`），可用 `--no-cache` 禁用，`--force-refresh` 强制刷新。
+如需切换基准，使用 `--benchmark / --benchmark-source / --benchmark-label`。
+ETF 基准需要 `fund_daily/fund_adj` 权限（约 2000 积分）；权限不足可用 `--benchmark-source index --benchmark 000300.SH` 回退到价格口径。
+切换基准或口径后建议用 `--backfill-mode all` 全量重算历史区间。
 
 5. 仅重绘图表（不调用 Tushare，可选）
 
 ```bash
-python src/redraw_chart.py
+zoo-chart
+# 或：python src/redraw_chart.py
 ```
 
 如果 `nav.csv` 或输出路径不在默认位置，可用：
 
 ```bash
-python src/redraw_chart.py --nav docs/nav.csv --out docs/chart.png
+zoo-chart --nav docs/nav.csv --out docs/chart.png
 ```
+如需调整图表中的基准名称，可加 `--benchmark-label`。
+
+## Makefile 快捷命令（可选）
+
+```bash
+make daily
+make backfill
+make chart
+make test
+```
+Makefile 默认调用 `zoo-index`/`zoo-chart`，请先执行 `pip install -e .` 或 `pip install .`。
 
 ## 规则配置
 
@@ -70,7 +88,7 @@ python src/redraw_chart.py --nav docs/nav.csv --out docs/chart.png
 
 * `exclude_patterns`：包含这些词的简称会被剔除
 
-* `force_include / force_exclude`：按股票代码或完整简称强制处理
+* `force_include / force_exclude`：仅支持 ts_code 强制处理
 
 ## 产物说明
 
@@ -81,6 +99,8 @@ python src/redraw_chart.py --nav docs/nav.csv --out docs/chart.png
 * `data/holdings_YYYYMMDD.csv`：当日成分与权重
 
 * `data/changes_YYYYMMDD.json`：成分变化摘要（基于 constituents，含单字词疑似误伤清单）
+
+* `data/rules_snapshot_*.yml`：回填时的规则快照（可用 `--no-rules-snapshot` 关闭）
 
 * `data/cache/`：Tushare 原始数据缓存（默认不提交）
 
@@ -108,7 +128,7 @@ https://img.shields.io/endpoint?url=https://<user>.github.io/<repo>/badges/zoo_s
 
 * 回填使用 `list_date` / `delist_date` 过滤存量股票，减少幸存者偏差。
 
-* 当前净值为价格指数口径，未做分红送转调整。
+* 指数收益使用复权因子（`adj_factor` / `fund_adj`）还原分红送转影响，基准默认使用沪深300ETF（`510300.SH`）复权口径。
 
 * 默认等权，遇到缺少行情的成分会自动剔除并重新归一化权重；成分变更以 constituents 为准。
 
@@ -161,7 +181,7 @@ pytest
 
   * 包含大量单字，容易产生“噪音”（误伤）。
 
-  * 注意：虽然名为“扩展”，但它是基于独立关键词匹配的。如果一个“严格”关键词（如“海鸥”）不包含任何“扩展”关键词（扩展列表里有“鸟”但没“鸥”），它可能只在严格动物园而不在扩展动物园（除非代码逻辑强制合并，但目前代码是独立判断）。
+  * 注意：扩展动物园会默认合并严格关键词，因此扩展必然包含严格；规则里只需维护各自词表即可。
 
 ### 通用规则
 
@@ -169,7 +189,7 @@ pytest
 
   * 排除规则 (exclude_patterns)：剔除如 马钢、龙湖、龙光 等已知非动物的干扰项。
 
-  * 强制名单 (force_include/exclude)：可以在 rules.yml 中通过代码或名称强制将某只股票同时加入或踢出两个动物园。
+  * 强制名单 (force_include/exclude)：可在 rules.yml 中通过 ts_code 强制将某只股票同时加入或踢出两个动物园。
 
   * 排除 ST：默认排除 ST 股票。
 

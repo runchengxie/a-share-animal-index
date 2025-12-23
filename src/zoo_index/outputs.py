@@ -137,7 +137,12 @@ def save_changes(path: Path, date: str, changes: dict, suspected_noise: dict | N
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def generate_latest_json(path: Path, latest: pd.Series) -> None:
+def generate_latest_json(
+    path: Path,
+    latest: pd.Series,
+    benchmark_code: str = "510300.SH",
+    benchmark_label: str = "HS300 ETF",
+) -> None:
     payload = {
         "date": latest["date"],
         "zoo_strict_nav": round(float(latest["zoo_strict_nav"]), 6),
@@ -152,11 +157,15 @@ def generate_latest_json(path: Path, latest: pd.Series) -> None:
         "zoo_extended_excess": round(
             float(latest["zoo_extended_ret"] - latest["hs300_ret"]), 6
         ),
+        "benchmark_code": benchmark_code,
+        "benchmark_label": benchmark_label,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def generate_badges(badges_dir: Path, latest: pd.Series) -> None:
+def generate_badges(
+    badges_dir: Path, latest: pd.Series, benchmark_label: str = "HS300 ETF"
+) -> None:
     badges_dir.mkdir(parents=True, exist_ok=True)
     items = [
         ("zoo_strict_nav", "Zoo Strict NAV", f"{latest['zoo_strict_nav']:.4f}", "2f855a"),
@@ -166,7 +175,7 @@ def generate_badges(badges_dir: Path, latest: pd.Series) -> None:
             f"{latest['zoo_extended_nav']:.4f}",
             "c05621",
         ),
-        ("hs300_nav", "HS300 NAV", f"{latest['hs300_nav']:.4f}", "3182ce"),
+        ("hs300_nav", f"{benchmark_label} NAV", f"{latest['hs300_nav']:.4f}", "3182ce"),
     ]
     for name, label, message, color in items:
         payload = {
@@ -179,7 +188,9 @@ def generate_badges(badges_dir: Path, latest: pd.Series) -> None:
         path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def generate_chart(path: Path, nav_df: pd.DataFrame) -> None:
+def generate_chart(
+    path: Path, nav_df: pd.DataFrame, benchmark_label: str = "HS300 ETF"
+) -> None:
     if nav_df.empty:
         return
 
@@ -191,7 +202,7 @@ def generate_chart(path: Path, nav_df: pd.DataFrame) -> None:
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(dates, nav_df["zoo_strict_nav"], label="Zoo Strict", linewidth=1.6)
     ax.plot(dates, nav_df["zoo_extended_nav"], label="Zoo Extended", linewidth=1.6)
-    ax.plot(dates, nav_df["hs300_nav"], label="HS300", linewidth=1.6)
+    ax.plot(dates, nav_df["hs300_nav"], label=benchmark_label, linewidth=1.6)
 
     locator = mdates.AutoDateLocator(minticks=6, maxticks=10)
     ax.xaxis.set_major_locator(locator)
@@ -212,6 +223,7 @@ def generate_index_html(
     latest: pd.Series,
     strict_stats: IndexStats,
     extended_stats: IndexStats,
+    benchmark_label: str = "HS300 ETF",
 ) -> None:
     payload = {
         "date": latest["date"],
@@ -327,7 +339,7 @@ def generate_index_html(
         <div class="stat"><small>成分股</small> {extended_stats.priced_constituents}/{extended_stats.total_constituents}</div>
       </div>
       <div class="card">
-        <h3>沪深300</h3>
+        <h3>{benchmark_label}</h3>
         <div class="stat">{payload['hs300_nav']}</div>
         <div class="stat"><small>今日涨跌</small> {payload['hs300_daily']}</div>
       </div>
@@ -337,7 +349,7 @@ def generate_index_html(
     </section>
     <section class="notes">
       <p>说明：严格动物园仅收录明确动物词汇，扩展动物园包含单字动物/神兽词，噪声更高但更热闹。</p>
-      <p>净值为价格指数口径，未做分红送转调整。</p>
+      <p>净值使用复权因子还原分红送转影响，基准同步复权。</p>
     </section>
   </main>
 </body>

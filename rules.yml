@@ -57,7 +57,7 @@ exclude_patterns:
   - 龙湖
   - 龙光
 
-# Force include/exclude by ts_code or exact name.
+# Force include/exclude by ts_code only.
 force_include: []
 force_exclude: []
 

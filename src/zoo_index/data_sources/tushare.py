@@ -176,6 +176,25 @@ class TushareClient:
             time.sleep(0.6 * (2**attempt))
         return last
 
+    def get_adj_factor(self, trade_date: str) -> pd.DataFrame:
+        cache_path = self._cache_path("adj_factor", f"{trade_date}.parquet")
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
+        last = pd.DataFrame()
+        for attempt in range(5):
+            df = self._pro.adj_factor(
+                trade_date=trade_date,
+                fields="ts_code,trade_date,adj_factor",
+            )
+            if not df.empty:
+                df = df.drop_duplicates(subset=["ts_code"])
+                self._write_cache(cache_path, df)
+                return df
+            last = df
+            time.sleep(0.6 * (2**attempt))
+        return last
+
     def get_index_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame:
         cache_path = self._cache_path("index_daily", ts_code, f"{trade_date}.parquet")
         cached = self._read_cache(cache_path)
@@ -187,6 +206,44 @@ class TushareClient:
                 ts_code=ts_code,
                 trade_date=trade_date,
                 fields="ts_code,close,pre_close",
+            )
+            if not df.empty:
+                self._write_cache(cache_path, df)
+                return df
+            last = df
+            time.sleep(0.6 * (2**attempt))
+        return last
+
+    def get_fund_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+        cache_path = self._cache_path("fund_daily", ts_code, f"{trade_date}.parquet")
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
+        last = pd.DataFrame()
+        for attempt in range(5):
+            df = self._pro.fund_daily(
+                ts_code=ts_code,
+                trade_date=trade_date,
+                fields="ts_code,trade_date,close,pre_close",
+            )
+            if not df.empty:
+                self._write_cache(cache_path, df)
+                return df
+            last = df
+            time.sleep(0.6 * (2**attempt))
+        return last
+
+    def get_fund_adj(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+        cache_path = self._cache_path("fund_adj", ts_code, f"{trade_date}.parquet")
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
+        last = pd.DataFrame()
+        for attempt in range(5):
+            df = self._pro.fund_adj(
+                ts_code=ts_code,
+                trade_date=trade_date,
+                fields="ts_code,trade_date,adj_factor",
             )
             if not df.empty:
                 self._write_cache(cache_path, df)

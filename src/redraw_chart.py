@@ -22,6 +22,12 @@ def _parse_args() -> argparse.Namespace:
         default="docs/chart.png",
         help="Output chart path.",
     )
+    parser.add_argument(
+        "--benchmark-label",
+        type=str,
+        default="HS300 ETF",
+        help="Benchmark label used in the chart.",
+    )
     return parser.parse_args()
 
 
@@ -39,7 +45,7 @@ def main() -> int:
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    generate_chart(out_path, nav_df)
+    generate_chart(out_path, nav_df, args.benchmark_label)
     print(f"chart saved: {out_path}")
     return 0
 

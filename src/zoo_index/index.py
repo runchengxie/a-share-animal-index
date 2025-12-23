@@ -124,13 +124,34 @@ def build_constituents(stock_basic: pd.DataFrame, rules: Rules) -> tuple[pd.Data
 
 
 def compute_equal_weight_return(
-    constituents: pd.DataFrame, daily_prices: pd.DataFrame
+    constituents: pd.DataFrame,
+    daily_prices: pd.DataFrame,
+    adj_factors: pd.DataFrame | None = None,
+    prev_adj_factors: pd.DataFrame | None = None,
 ) -> tuple[float, pd.DataFrame, IndexStats]:
     if constituents.empty:
         return 0.0, constituents, IndexStats(0, 0, 0)
 
     merged = constituents.merge(daily_prices, on="ts_code", how="left")
-    merged["ret"] = merged["close"] / merged["pre_close"] - 1
+    if adj_factors is not None and prev_adj_factors is not None:
+        merged = merged.merge(
+            adj_factors[["ts_code", "adj_factor"]],
+            on="ts_code",
+            how="left",
+        )
+        prev_factors = prev_adj_factors[["ts_code", "adj_factor"]].rename(
+            columns={"adj_factor": "prev_adj_factor"}
+        )
+        merged = merged.merge(prev_factors, on="ts_code", how="left")
+        merged["adj_factor"] = pd.to_numeric(merged["adj_factor"], errors="coerce")
+        merged["prev_adj_factor"] = pd.to_numeric(merged["prev_adj_factor"], errors="coerce")
+        merged.loc[merged["adj_factor"] <= 0, "adj_factor"] = pd.NA
+        merged.loc[merged["prev_adj_factor"] <= 0, "prev_adj_factor"] = pd.NA
+        merged["ret"] = merged["close"] / merged["pre_close"] * (
+            merged["adj_factor"] / merged["prev_adj_factor"]
+        ) - 1
+    else:
+        merged["ret"] = merged["close"] / merged["pre_close"] - 1
 
     valid = merged.dropna(subset=["ret", "close", "pre_close"]).copy()
     valid = valid[valid["pre_close"] > 0]

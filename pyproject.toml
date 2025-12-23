@@ -21,8 +21,13 @@ dev = [
   "ruff",
 ]
 
+[project.scripts]
+zoo-index = "run_daily:main"
+zoo-chart = "redraw_chart:main"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
+py-modules = ["run_daily", "redraw_chart"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
