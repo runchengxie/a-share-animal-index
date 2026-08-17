@@ -48,6 +48,43 @@
 
 `https://img.shields.io/endpoint?url=https://<你的站点>/badges/benchmark_nav.json`
 
+## 数据源与 Token
+
+指数计算依赖 Tushare 行情，由 `src/zoo_index/data_sources/tushare.py` 的 `TushareClient` 封装。
+
+环境变量：
+
+- `TUSHARE_TOKEN`：主 Token（必填）。
+- `TUSHARE_TOKEN_2`：备用 Token（可选），走转发代理。
+- `TUSHARE_API_URL`：转发代理地址（可选），仅作用于备用 Token。
+
+回退逻辑：`TushareClient` 在主 Token 请求失败时，自动用备用 Token（经 `TUSHARE_API_URL`）重试一次；备用端不再二次回退，避免死循环。回退只改变数据获取路径，指数计算口径不受影响。两者皆未设置时，只走官方接口。
+
+```bash
+export TUSHARE_TOKEN=你的token
+export TUSHARE_TOKEN_2=转发代理给你的key
+export TUSHARE_API_URL=https://<转发代理地址>
+```
+
+## 使用细节
+
+`uv run zoo-index` 常用参数：
+
+- 日期：`--date YYYYMMDD` 指定交易日；缺省为上海时区最近完整交易日。
+- 回填：`--backfill`（默认最近 5 年）、`--backfill N`（按天数）、`--backfill-years Y`（按年）。
+- 重算模式：`--backfill-mode all` 全量重算历史区间（切换基准或口径后建议用）。
+- 快照：`--backfill-write-snapshots` 生成每日持仓快照；`--no-rules-snapshot` 关闭规则快照。
+- 缓存：默认启用 `data/cache/`；`--no-cache` 禁用，`--force-refresh` 强制刷新。
+- 基准：`--benchmark` / `--benchmark-source` / `--benchmark-label` 切换基准。ETF 基准需 `fund_daily` / `fund_adj` 权限（约 2000 积分）；权限不足可回退到 `--benchmark-source index --benchmark 000300.SH` 的价格口径。
+
+仅重绘图表（不调用 Tushare）：
+
+```bash
+uv run zoo-chart --nav artifacts/data/nav.csv --out artifacts/data/chart.png
+```
+
+Makefile 快捷命令：`make daily` / `make backfill` / `make chart` / `make test` / `make lint`。
+
 ## 部署
 
 ### GitHub Pages（默认）
