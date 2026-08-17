@@ -31,6 +31,17 @@
 4. 网页（Vite + React + ECharts）只读取 `web/public/data/` 下的公开 JSON，不接触 Tushare Token，也不在浏览器中计算指数。
 5. 构建产物 `web/dist` 通过 `actions/deploy-pages` 部署到 GitHub Pages。
 
+## 计算模型
+
+单日计算由 `runner.compute_day` 完成，核心是带状态的 `PortfolioState`。
+
+- `PortfolioState` 记录上一交易日的双变体组合（strict / extended），含各成分固定权重、成分表与停牌连续天数。
+- 月度首个交易日触发再平衡：用上一篮子计算当日收益（去前视），新篮子等权后于次日生效。
+- 月内沿用上一篮子与固定权重，不再每日重算。
+- 异常再平衡：持有成分出现退市、新 ST 或连续停牌超阈值时，剔除触发成分并重新等权，新权重当日生效。
+- 规则时点化：`_get_constituents_for_rebalance` 在每次再平衡时按 `rules_path` 调用 `load_rules_asof`，使用当时生效的规则版本。
+- 状态重建：`run_daily` 从上一交易日的 `holdings_YYYYMMDD.csv` 读取权重与停牌天数重建 `PortfolioState`；`run_backfill` 在回填循环中按日向后传递状态，保证历史可复现且无前视。
+
 ## 徽章
 
 `artifacts/data/badges/*.json` 是 shields.io 格式的徽章数据。若要在自有站点展示，把 `badges/` 一并发布，再用：

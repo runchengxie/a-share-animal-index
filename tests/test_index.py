@@ -97,3 +97,75 @@ def test_compute_equal_weight_return_uses_adjusted_price_ratio() -> None:
 
     assert stats.priced_constituents == 1
     assert index_ret == pytest.approx(0.05263, abs=1e-4)
+
+
+def test_compute_equal_weight_return_respects_fixed_weights() -> None:
+    # 固定权重模式：传入 weights，指数收益 = Σ weight_i * ret_i，而非 1/N 重算。
+    constituents = _frame(
+        [
+            {"ts_code": "000001.SZ", "name": "Alpha", "keyword": "CAT", "forced": False},
+            {"ts_code": "000002.SZ", "name": "Beta", "keyword": "DOG", "forced": False},
+            {"ts_code": "000003.SZ", "name": "Gamma", "keyword": "OX", "forced": False},
+        ]
+    )
+    daily_prices = _frame(
+        [
+            {"ts_code": "000001.SZ", "close": 11.0, "pre_close": 10.0},
+            {"ts_code": "000002.SZ", "close": 10.5, "pre_close": 10.0},
+            {"ts_code": "000003.SZ", "close": 12.0, "pre_close": 10.0},
+        ]
+    )
+    prev_daily_prices = _frame(
+        [
+            {"ts_code": "000001.SZ", "close": 10.0},
+            {"ts_code": "000002.SZ", "close": 10.0},
+            {"ts_code": "000003.SZ", "close": 10.0},
+        ]
+    )
+    # 非等权固定权重（例如市值加权模拟）。
+    weights = {"000001.SZ": 0.5, "000002.SZ": 0.3, "000003.SZ": 0.2}
+    # ret：+10% / +5% / +20% → 0.5*0.10 + 0.3*0.05 + 0.2*0.20 = 0.105。
+    index_ret, holdings, stats = compute_equal_weight_return(
+        constituents, daily_prices, prev_daily_prices, weights=weights
+    )
+
+    assert index_ret == pytest.approx(0.105)
+    assert stats.priced_constituents == 3
+    assert holdings["weight"].sum() == pytest.approx(1.0)
+    # 权重沿用传入值，不被重算为 1/N。
+    assert dict(zip(holdings["ts_code"], holdings["weight"], strict=False)) == weights
+
+
+def test_compute_equal_weight_return_missing_keeps_weight() -> None:
+    # 真实缺失成分：权重保留、当日贡献 0 收益，不静默再分配给其他成分。
+    constituents = _frame(
+        [
+            {"ts_code": "000001.SZ", "name": "Alpha", "keyword": "CAT", "forced": False},
+            {"ts_code": "000002.SZ", "name": "Beta", "keyword": "DOG", "forced": False},
+        ]
+    )
+    daily_prices = _frame(
+        [
+            {"ts_code": "000001.SZ", "close": 11.0, "pre_close": 10.0},
+        ]
+    )
+    prev_daily_prices = _frame(
+        [
+            {"ts_code": "000001.SZ", "close": 10.0},
+            {"ts_code": "000002.SZ", "close": 10.0},
+        ]
+    )
+    weights = {"000001.SZ": 0.5, "000002.SZ": 0.5}
+    # 000002 缺失，贡献 0；指数收益 = 0.5*0.10 + 0.5*0 = 0.05（非 0.10）。
+    index_ret, holdings, stats = compute_equal_weight_return(
+        constituents, daily_prices, prev_daily_prices, weights=weights
+    )
+
+    assert index_ret == pytest.approx(0.05)
+    assert stats.total_constituents == 2
+    assert stats.priced_constituents == 1
+    assert stats.missing_prices == 1
+    # 缺失成分仍在持仓快照中，权重保留。
+    missing_row = holdings[holdings["ts_code"] == "000002.SZ"].iloc[0]
+    assert missing_row["weight"] == pytest.approx(0.5)
+    assert missing_row["ret"] == pytest.approx(0.0)

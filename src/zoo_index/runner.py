@@ -8,10 +8,19 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from zoo_index.config import load_rules
-from zoo_index.data_sources.tushare import TushareClient, TushareLike
+from zoo_index.config import load_rules, load_rules_asof
+from zoo_index.data_sources.tushare import (
+    BenchmarkSourceLike,
+    DailySourceLike,
+    TushareClient,
+    TushareLike,
+)
 from zoo_index.index import (
     IndexStats,
+    PortfolioState,
+    VariantState,
+    _apply_namechange,
+    _equal_weights,
     build_constituents,
     compute_equal_weight_return,
     prepare_universe_asof,
@@ -63,6 +72,7 @@ class DailyResult:
     extended_stats: IndexStats
     benchmark_code: str
     benchmark_label: str
+    state: PortfolioState | None = None
 
 
 @dataclass
@@ -179,29 +189,50 @@ def _compute_benchmark_daily_return(close: float, pre_close: float) -> float:
     return close / pre_close - 1
 
 
-def _index_benchmark_return(client: TushareLike, trade_date: str, code: str) -> float:
+def _adj_factor_value(df: pd.DataFrame | None, code: str) -> float:
+    """提取复权因子，缺失或非正时回退为 1.0（不影响收益口径）。"""
+    if df is None or df.empty or "adj_factor" not in df.columns:
+        return 1.0
+    row = df[df["ts_code"].astype(str) == str(code)]
+    if row.empty:
+        return 1.0
+    value = pd.to_numeric(row.iloc[0]["adj_factor"], errors="coerce")
+    return 1.0 if pd.isna(value) or value <= 0 else float(value)
+
+
+def _index_benchmark_return(client: BenchmarkSourceLike, trade_date: str, code: str) -> float:
     df = client.get_index_daily(trade_date, code)
     if df.empty:
         raise ValueError("基准行情为空")
     row = df.iloc[0]
     if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
+    # 指数 pre_close 为交易所复权价，直接用 close/pre_close。
     return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
 
 
-def _fund_benchmark_return(client: TushareLike, trade_date: str, code: str) -> float:
+def _fund_benchmark_return(
+    client: BenchmarkSourceLike, trade_date: str, prev_date: str, code: str
+) -> float:
     df = client.get_fund_daily(trade_date, code)
-    if df.empty:
+    prev_df = client.get_fund_daily(prev_date, code)
+    if df.empty or prev_df.empty:
         raise ValueError("基准行情为空")
     row = df.iloc[0]
     if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
-    return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
+    close = float(row["close"])
+    pre_close = float(row["pre_close"])
+    adj = _adj_factor_value(client.get_fund_adj(trade_date, code), code)
+    prev_adj = _adj_factor_value(client.get_fund_adj(prev_date, code), code)
+    # 基准与指数同口径：close*adj / (pre_close*prev_adj) - 1。
+    return close * adj / (pre_close * prev_adj) - 1
 
 
 def _stock_benchmark_return(
-    client: TushareLike,
+    client: BenchmarkSourceLike,
     trade_date: str,
+    prev_date: str,
     code: str,
     daily_prices: pd.DataFrame | None,
 ) -> float:
@@ -213,11 +244,15 @@ def _stock_benchmark_return(
     row = row_slice.iloc[0]
     if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
-    return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
+    close = float(row["close"])
+    pre_close = float(row["pre_close"])
+    adj = _adj_factor_value(client.get_adj_factor(trade_date), code)
+    prev_adj = _adj_factor_value(client.get_adj_factor(prev_date), code)
+    return close * adj / (pre_close * prev_adj) - 1
 
 
 def _get_benchmark_return(
-    client: TushareLike,
+    client: BenchmarkSourceLike,
     trade_date: str,
     prev_date: str,
     benchmark: BenchmarkConfig,
@@ -228,9 +263,9 @@ def _get_benchmark_return(
     if source == "index":
         return _index_benchmark_return(client, trade_date, code)
     if source == "fund":
-        return _fund_benchmark_return(client, trade_date, code)
+        return _fund_benchmark_return(client, trade_date, prev_date, code)
     if source == "stock":
-        return _stock_benchmark_return(client, trade_date, code, daily_prices)
+        return _stock_benchmark_return(client, trade_date, prev_date, code, daily_prices)
     raise ValueError(f"unknown benchmark source: {source}")
 
 
@@ -264,6 +299,98 @@ def _find_previous_snapshot(manifests_dir: Path, prefix: str, date: str) -> Path
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def _variant_state_from_holdings(df: pd.DataFrame, variant: str) -> VariantState | None:
+    sub = df[df["variant"] == variant]
+    if sub.empty:
+        return None
+    weights = dict(zip(sub["ts_code"].astype(str), sub["weight"].astype(float), strict=False))
+    constituents = sub[["ts_code", "name", "keyword", "forced"]].copy()
+    constituents["ts_code"] = constituents["ts_code"].astype(str)
+    if "susp_days" in sub.columns:
+        susp_days = dict(
+            zip(sub["ts_code"].astype(str), sub["susp_days"].astype(int), strict=False)
+        )
+    else:
+        susp_days = {}
+    return VariantState(
+        weights=weights, constituents=constituents, reason="restored", susp_days=susp_days
+    )
+
+
+def _attach_susp_days(holdings: pd.DataFrame, streak: dict[str, int]) -> pd.DataFrame:
+    """将停牌连续天数写入 holdings 快照，供 run_daily 重建状态。"""
+    holdings = holdings.copy()
+    holdings["susp_days"] = (
+        holdings["ts_code"].map(lambda code: streak.get(str(code), 0)).astype(int)
+    )
+    return holdings
+
+
+def load_portfolio_state(holdings_path: Path, date: str) -> PortfolioState | None:
+    """从 holdings_{date}.csv 重建双变体组合状态，供单日 run_daily 去前视。"""
+    if not holdings_path.exists():
+        return None
+    df = pd.read_csv(holdings_path, dtype={"ts_code": str})
+    if df.empty or "variant" not in df.columns:
+        return None
+    strict = _variant_state_from_holdings(df, "strict")
+    extended = _variant_state_from_holdings(df, "extended")
+    if strict is None or extended is None:
+        return None
+    return PortfolioState(date=date, strict=strict, extended=extended)
+
+
+def _anomalous_codes(
+    held: pd.DataFrame,
+    stock_basic: pd.DataFrame,
+    namechange: pd.DataFrame,
+    date: str,
+    suspended: set[str],
+    prev_streak: dict[str, int],
+    max_susp_days: int,
+) -> tuple[set[str], dict[str, int]]:
+    """检测持有成分中的异常，返回需剔除的代码与更新后的停牌连续天数。
+
+    异常三类：(1) 截至当日已退市（delist_date <= date）；(2) 当日名称含 ST；
+    (3) 连续停牌达到 max_susp_days（跨日累计，max_susp_days<=0 时关闭）。
+    """
+    if held.empty:
+        return set(), {}
+
+    current = _apply_namechange(held[["ts_code", "name"]], namechange, date)
+    name_map = (
+        dict(zip(current["ts_code"], current["name"], strict=False)) if not current.empty else {}
+    )
+
+    delist: dict[str, int] = {}
+    if "delist_date" in stock_basic.columns:
+        sb = stock_basic.set_index("ts_code")
+        for code in held["ts_code"]:
+            if code in sb.index:
+                value = pd.to_numeric(sb.loc[code, "delist_date"], errors="coerce")
+                delist[code] = 99999999 if pd.isna(value) else int(value)
+
+    as_of = int(date)
+    new_streak: dict[str, int] = {}
+    anomalies: set[str] = set()
+    for code in held["ts_code"]:
+        streak = prev_streak.get(code, 0)
+        streak = streak + 1 if code in suspended else 0
+        new_streak[code] = streak
+
+        delist_date = delist.get(code, 99999999)
+        if delist_date <= as_of:
+            anomalies.add(code)
+            continue
+        name = name_map.get(code, "")
+        if isinstance(name, str) and "ST" in name:
+            anomalies.add(code)
+            continue
+        if max_susp_days > 0 and streak >= max_susp_days:
+            anomalies.add(code)
+    return anomalies, new_streak
+
+
 def _month_first_open_date(client: TushareLike, date: str, cache: dict[str, str]) -> str:
     month_key = date[:6]
     if month_key in cache:
@@ -279,19 +406,52 @@ def _month_first_open_date(client: TushareLike, date: str, cache: dict[str, str]
     return first_date
 
 
+def _amounts_asof(client: DailySourceLike, trade_date: str) -> pd.DataFrame:
+    """取再平衡日成交额，用于流动性过滤；无 amount 列时返回空表。"""
+    daily = client.get_daily(trade_date)
+    if daily.empty or "amount" not in daily.columns:
+        return pd.DataFrame(columns=pd.Index(["ts_code", "amount"]))
+    return daily[["ts_code", "amount"]].copy()
+
+
+def _filter_by_amount(
+    constituents: pd.DataFrame, amounts: pd.DataFrame, min_daily_amount: float
+) -> pd.DataFrame:
+    if amounts.empty:
+        return constituents
+    merged = constituents.merge(amounts, on="ts_code", how="left")
+    merged["amount"] = pd.to_numeric(merged["amount"], errors="coerce")
+    # 成交额低于门槛或缺失者剔除（缺失视为流动性不足）。
+    filtered = merged[merged["amount"] >= min_daily_amount].copy()
+    return filtered.drop(columns=["amount"])
+
+
 def _get_constituents_for_rebalance(
     cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]],
     stock_basic: pd.DataFrame,
     namechange: pd.DataFrame,
     rules,
     rebalance_date: str,
+    rules_path: Path | None = None,
+    client: DailySourceLike | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if rebalance_date in cache:
         return cache[rebalance_date]
-    universe = prepare_universe_asof(stock_basic, namechange, rebalance_date, rules)
-    strict_df, extended_df = build_constituents(universe, rules)
+    effective_rules = rules
+    if rules_path is not None:
+        effective_rules = load_rules_asof(rebalance_date, rules_path)
+    universe = prepare_universe_asof(stock_basic, namechange, rebalance_date, effective_rules)
+    strict_df, extended_df = build_constituents(universe, effective_rules)
     if strict_df.empty or extended_df.empty:
         raise ValueError("constituents is empty")
+    # 流动性过滤：按再平衡日成交额剔除低流动性成分。
+    if effective_rules.min_daily_amount > 0 and client is not None:
+        amounts = _amounts_asof(client, rebalance_date)
+        if not amounts.empty:
+            strict_df = _filter_by_amount(strict_df, amounts, effective_rules.min_daily_amount)
+            extended_df = _filter_by_amount(extended_df, amounts, effective_rules.min_daily_amount)
+            if strict_df.empty or extended_df.empty:
+                raise ValueError("constituents is empty after liquidity filter")
     cache[rebalance_date] = (strict_df, extended_df)
     return cache[rebalance_date]
 
@@ -304,6 +464,148 @@ def _build_nav_from_returns(ret_df: pd.DataFrame) -> pd.DataFrame:
     return nav_df
 
 
+def _resolve_day_variants(
+    held_strict: pd.DataFrame,
+    held_w_strict: dict[str, float],
+    held_extended: pd.DataFrame,
+    held_w_extended: dict[str, float],
+    prev_state: PortfolioState | None,
+    is_rebalance: bool,
+    month_strict: pd.DataFrame,
+    month_extended: pd.DataFrame,
+    strict_anom: set[str],
+    extended_anom: set[str],
+    daily_prices: pd.DataFrame,
+    prev_daily: pd.DataFrame,
+    adj_factors: pd.DataFrame,
+    prev_adj_factors: pd.DataFrame,
+    suspended: set[str],
+) -> tuple[
+    float,
+    pd.DataFrame,
+    IndexStats,
+    pd.DataFrame,
+    dict[str, float],
+    str,
+    float,
+    pd.DataFrame,
+    IndexStats,
+    pd.DataFrame,
+    dict[str, float],
+    str,
+]:
+    """计算双变体当日收益与快照，并返回下一状态的组合信息。
+
+    异常再平衡（anom 非空）优先：剔除触发成分、对剩余重新等权、当日生效；
+    否则按 seed / 月度再平衡（去前视）/ 月内持有 三种情形处理。
+    """
+
+    def _resolve_variant(
+        held: pd.DataFrame,
+        held_weights: dict[str, float],
+        prev_variant: VariantState | None,
+        month_basket: pd.DataFrame,
+        anom: set[str],
+    ) -> tuple[float, pd.DataFrame, IndexStats, pd.DataFrame, dict[str, float], str]:
+        if anom:
+            reduced = held[~held["ts_code"].isin(anom)].copy()
+            new_weights = _equal_weights(reduced)
+            ret, holdings, stats = compute_equal_weight_return(
+                reduced,
+                daily_prices,
+                prev_daily,
+                adj_factors,
+                prev_adj_factors,
+                suspended=suspended,
+                weights=new_weights,
+            )
+            return ret, holdings, stats, reduced, new_weights, "exception"
+        if prev_variant is None:
+            ret, holdings, stats = compute_equal_weight_return(
+                held,
+                daily_prices,
+                prev_daily,
+                adj_factors,
+                prev_adj_factors,
+                suspended=suspended,
+                weights=held_weights,
+            )
+            return ret, holdings, stats, held, held_weights, "seed"
+        if is_rebalance:
+            ret, _, stats = compute_equal_weight_return(
+                held,
+                daily_prices,
+                prev_daily,
+                adj_factors,
+                prev_adj_factors,
+                suspended=suspended,
+                weights=held_weights,
+            )
+            _, holdings, _ = compute_equal_weight_return(
+                month_basket,
+                daily_prices,
+                prev_daily,
+                adj_factors,
+                prev_adj_factors,
+                suspended=suspended,
+                weights=_equal_weights(month_basket),
+            )
+            return ret, holdings, stats, month_basket, _equal_weights(month_basket), "monthly"
+        ret, holdings, stats = compute_equal_weight_return(
+            held,
+            daily_prices,
+            prev_daily,
+            adj_factors,
+            prev_adj_factors,
+            suspended=suspended,
+            weights=held_weights,
+        )
+        return ret, holdings, stats, held, held_weights, prev_variant.reason
+
+    (
+        strict_ret,
+        strict_holdings,
+        strict_stats,
+        strict_new_const,
+        strict_new_weights,
+        strict_reason,
+    ) = _resolve_variant(
+        held_strict,
+        held_w_strict,
+        prev_state.strict if prev_state else None,
+        month_strict,
+        strict_anom,
+    )
+    (
+        extended_ret,
+        extended_holdings,
+        extended_stats,
+        extended_new_const,
+        extended_new_weights,
+        extended_reason,
+    ) = _resolve_variant(
+        held_extended,
+        held_w_extended,
+        prev_state.extended if prev_state else None,
+        month_extended,
+        extended_anom,
+    )
+    return (
+        strict_ret,
+        strict_holdings,
+        strict_stats,
+        strict_new_const,
+        strict_new_weights,
+        strict_reason,
+        extended_ret,
+        extended_holdings,
+        extended_stats,
+        extended_new_const,
+        extended_new_weights,
+        extended_reason,
+    )
+
+
 def compute_day(
     client: TushareLike,
     rules,
@@ -312,8 +614,14 @@ def compute_day(
     stock_basic: pd.DataFrame,
     namechange: pd.DataFrame,
     constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] | None = None,
+    rules_path: Path | None = None,
+    prev_state: PortfolioState | None = None,
 ) -> DailyResult:
-    """计算指定交易日的双指数收益与成分。daily 与 backfill 共用此函数。"""
+    """计算指定交易日的双指数收益与成分。daily 与 backfill 共用此函数。
+
+    prev_state 为上一交易日组合快照（含固定权重）。无 prev_state 视为建仓首日，
+    当日即用新篮子等权；否则当日收益沿用上一篮子（去前视），新篮子于次日生效。
+    """
     month_cache: dict[str, str] = {}
     rebalance_date = _month_first_open_date(client, date, month_cache)
     strict_df, extended_df = _get_constituents_for_rebalance(
@@ -322,6 +630,8 @@ def compute_day(
         namechange,
         rules,
         rebalance_date,
+        rules_path=rules_path,
+        client=client,
     )
 
     daily_prices = client.get_daily(date)
@@ -343,21 +653,81 @@ def compute_day(
     except Exception as exc:
         print(f"获取停牌信息失败，当日按无停牌处理：{exc}")
 
-    strict_ret, strict_holdings, strict_stats = compute_equal_weight_return(
-        strict_df,
-        daily_prices,
-        prev_daily,
-        adj_factors,
-        prev_adj_factors,
-        suspended=suspended,
+    is_new_month = prev_state is None or prev_state.date[:6] != date[:6]
+    is_rebalance = is_new_month
+    max_susp_days = getattr(rules, "max_suspension_days", 0)
+
+    # 当日持有篮子（held）：seed 用当月篮子；否则上一日状态篮子。
+    if prev_state is None:
+        held_strict, held_w_strict = strict_df, _equal_weights(strict_df)
+        held_extended, held_w_extended = extended_df, _equal_weights(extended_df)
+    else:
+        held_strict, held_w_strict = prev_state.strict.constituents, prev_state.strict.weights
+        held_extended, held_w_extended = (
+            prev_state.extended.constituents,
+            prev_state.extended.weights,
+        )
+
+    # 异常检测（退市 / ST / 长期停牌），并累计停牌连续天数。
+    strict_anom, strict_streak = _anomalous_codes(
+        held_strict,
+        stock_basic,
+        namechange,
+        date,
+        suspended,
+        prev_state.strict.susp_days if prev_state else {},
+        max_susp_days,
     )
-    extended_ret, extended_holdings, extended_stats = compute_equal_weight_return(
+    extended_anom, extended_streak = _anomalous_codes(
+        held_extended,
+        stock_basic,
+        namechange,
+        date,
+        suspended,
+        prev_state.extended.susp_days if prev_state else {},
+        max_susp_days,
+    )
+
+    (
+        strict_ret,
+        strict_holdings,
+        strict_stats,
+        strict_new_const,
+        strict_new_weights,
+        strict_reason,
+        extended_ret,
+        extended_holdings,
+        extended_stats,
+        extended_new_const,
+        extended_new_weights,
+        extended_reason,
+    ) = _resolve_day_variants(
+        held_strict,
+        held_w_strict,
+        held_extended,
+        held_w_extended,
+        prev_state,
+        is_rebalance,
+        strict_df,
         extended_df,
+        strict_anom,
+        extended_anom,
         daily_prices,
         prev_daily,
         adj_factors,
         prev_adj_factors,
-        suspended=suspended,
+        suspended,
+    )
+
+    # 剔除成分从停牌计数中清除，避免跨月误累计。
+    strict_streak = {c: v for c, v in strict_streak.items() if c not in strict_anom}
+    extended_streak = {c: v for c, v in extended_streak.items() if c not in extended_anom}
+    strict_holdings = _attach_susp_days(strict_holdings, strict_streak)
+    extended_holdings = _attach_susp_days(extended_holdings, extended_streak)
+
+    new_strict = VariantState(strict_new_weights, strict_new_const, strict_reason, strict_streak)
+    new_extended = VariantState(
+        extended_new_weights, extended_new_const, extended_reason, extended_streak
     )
 
     if strict_stats.priced_constituents == 0 or extended_stats.priced_constituents == 0:
@@ -370,6 +740,8 @@ def compute_day(
         benchmark,
         daily_prices=daily_prices,
     )
+
+    new_state = PortfolioState(date=date, strict=new_strict, extended=new_extended)
 
     return DailyResult(
         date=date,
@@ -384,6 +756,7 @@ def compute_day(
         extended_stats=extended_stats,
         benchmark_code=benchmark.code,
         benchmark_label=benchmark.label,
+        state=new_state,
     )
 
 
@@ -453,6 +826,21 @@ def _write_changes_snapshot(
     generate_changes_json(data_dir / "changes.json", date, changes, suspected_noise)
 
 
+def _load_prev_state_for_daily(
+    client: TushareLike, date: str, manifests_dir: Path
+) -> PortfolioState | None:
+    """为单日 run_daily 从上一交易日 holdings 快照重建组合状态（去前视）。"""
+    try:
+        prev_date = _resolve_previous_open_date(client, date)
+    except Exception as exc:
+        print(f"重建上一日状态失败，按建仓首日处理：{exc}")
+        return None
+    prev_holdings = manifests_dir / f"holdings_{prev_date}.csv"
+    if not prev_holdings.exists():
+        return None
+    return load_portfolio_state(prev_holdings, prev_date)
+
+
 def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
     if client is None:
         client = _build_client(config)
@@ -495,8 +883,20 @@ def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
         print(f"获取股票列表失败：{exc}")
         return 1
 
+    # 重建上一交易日组合状态（去前视）：从 holdings_{prev_date}.csv 读取固定权重。
+    prev_state = _load_prev_state_for_daily(client, date, manifests_dir)
+
     try:
-        result = compute_day(client, rules, config.benchmark, date, stock_basic, namechange)
+        result = compute_day(
+            client,
+            rules,
+            config.benchmark,
+            date,
+            stock_basic,
+            namechange,
+            rules_path=config.rules_path,
+            prev_state=prev_state,
+        )
     except Exception as exc:
         print(f"计算指数失败（{date}）：{exc}")
         return 1
@@ -538,14 +938,25 @@ def _backfill_run_days(
     namechange: pd.DataFrame,
     output_dir: Path,
     write_snapshots: bool,
+    rules_path: Path | None = None,
+    prev_state: PortfolioState | None = None,
 ) -> tuple[list[dict], DailyResult | None]:
     constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
     ret_rows: list[dict] = []
     last_result: DailyResult | None = None
+    state = prev_state
 
     for trade_date in run_dates:
         result = compute_day(
-            client, rules, benchmark, trade_date, stock_basic, namechange, constituents_cache
+            client,
+            rules,
+            benchmark,
+            trade_date,
+            stock_basic,
+            namechange,
+            constituents_cache,
+            rules_path=rules_path,
+            prev_state=state,
         )
         ret_rows.append(
             {
@@ -555,12 +966,15 @@ def _backfill_run_days(
                 "benchmark_ret": result.benchmark_ret,
             }
         )
+        # 每日写入 holdings 快照，供后续 run_daily 重建状态（去前视）。
+        save_holdings(
+            (output_dir / "manifests") / f"holdings_{trade_date}.csv",
+            result.strict_holdings,
+            result.extended_holdings,
+        )
         if write_snapshots:
-            save_holdings(
-                (output_dir / "manifests") / f"holdings_{trade_date}.csv",
-                result.strict_holdings,
-                result.extended_holdings,
-            )
+            pass
+        state = result.state
         last_result = result
         print(
             "回填："
@@ -678,6 +1092,14 @@ def run_backfill(config: RunConfig, client: TushareLike | None = None) -> int:
         return 1
 
     try:
+        prev_state: PortfolioState | None = None
+        first_prev_path = _find_previous_snapshot(
+            output_dir / "manifests", "holdings", run_dates[0]
+        )
+        if first_prev_path is not None:
+            prev_date = first_prev_path.stem[len("holdings_") :]
+            prev_state = load_portfolio_state(first_prev_path, prev_date)
+
         ret_rows, last_result = _backfill_run_days(
             client,
             rules,
@@ -687,6 +1109,8 @@ def run_backfill(config: RunConfig, client: TushareLike | None = None) -> int:
             namechange,
             output_dir,
             config.backfill_write_snapshots,
+            rules_path=config.rules_path,
+            prev_state=prev_state,
         )
     except Exception as exc:
         print(f"回填计算失败：{exc}")

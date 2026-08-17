@@ -34,6 +34,30 @@ class TushareLike(Protocol):
     def get_suspension(self, trade_date: str) -> pd.DataFrame: ...
 
 
+class BenchmarkSourceLike(Protocol):
+    """基准收益计算所需的 Tushare 接口子集（比 TushareLike 更窄）。
+
+    仅覆盖 _get_benchmark_return 三个分支实际调用的方法，
+    便于测试用只实现 fund/index/stock 基准相关方法的轻量客户端替换。
+    """
+
+    def get_index_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame: ...
+    def get_fund_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame: ...
+    def get_fund_adj(self, trade_date: str, ts_code: str) -> pd.DataFrame: ...
+    def get_daily(self, trade_date: str) -> pd.DataFrame: ...
+    def get_adj_factor(self, trade_date: str) -> pd.DataFrame: ...
+
+
+class DailySourceLike(Protocol):
+    """仅需日线行情的 Tushare 接口子集（最窄）。
+
+    覆盖流动性过滤等只读取再平衡日成交额的场景，
+    测试客户端只需实现 get_daily 即可替换。
+    """
+
+    def get_daily(self, trade_date: str) -> pd.DataFrame: ...
+
+
 class TushareClient:
     # 进程内只提示一次：主 Token 失败已回退到备用 Token。
     _fallback_warned = False
@@ -211,7 +235,7 @@ class TushareClient:
             df = self._api(
                 "daily",
                 trade_date=trade_date,
-                fields="ts_code,close,pre_close",
+                fields="ts_code,close,pre_close,amount",
             )
             if not df.empty:
                 self._write_cache(cache_path, df)

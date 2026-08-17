@@ -1,0 +1,24 @@
+# 规则历史（point-in-time 回放用）
+#
+# 当前生效的规则在 rules.yml 中，被视为「最新版本」。
+# 当某次规则调整需要作用于历史区间时，在这里追加一条带生效日的记录，
+# 回填会用每个再平衡点当时生效的规则重算，而不是用当前规则重写整段历史。
+#
+# 每条记录的格式（rules 子项的字段与 rules.yml 完全一致）：
+#   - effective_from: "20240101"      # 该版本从这一交易日生效（含）
+#     rules:
+#       strict_keywords: [...]
+#       extended_keywords: [...]
+#       exclude_patterns: [...]
+#       force_include: []
+#       force_exclude: []
+#       exclude_st: true
+#       allow_beijing: false
+#       min_listing_days: 0
+#       min_daily_amount: 0.0
+#       max_suspension_days: 0
+#
+# 选取规则：effective_from <= 再平衡日 中最大的一条；若再平衡日早于所有历史版本，
+# 则取最早一条，避免把当前规则错配到没有对应记录的远古区间。
+#
+# 目前没有历史版本，回填会退化为直接使用 rules.yml（与改动前行为一致）。
