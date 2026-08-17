@@ -285,6 +285,7 @@ def _snapshot_rules(rules_path: Path, data_dir: Path, start_date: str, end_date:
     snapshot_path = data_dir / f"rules_snapshot_{start_date}_{end_date}_{timestamp}.yml"
     import shutil
 
+    _ensure_dirs(data_dir)
     shutil.copy2(rules_path, snapshot_path)
     return snapshot_path
 

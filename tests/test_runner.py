@@ -10,6 +10,7 @@ from zoo_index.data_sources.tushare import TradeCalendarEntry
 from zoo_index.runner import (
     BenchmarkConfig,
     RunConfig,
+    _snapshot_rules,
     compute_day,
     run_backfill,
     run_daily,
@@ -229,3 +230,16 @@ def test_run_backfill_all_mode_recomputes(tmp_path: Path) -> None:
     assert run_backfill(config, client) == 0
     nav = pd.read_csv(tmp_path / "nav.csv")
     assert len(nav) == 4
+
+
+def test_snapshot_rules_creates_missing_data_dir(tmp_path: Path) -> None:
+    rules = tmp_path / "rules.yml"
+    rules.write_text("constituents: []\n", encoding="utf-8")
+    data_dir = tmp_path / "out" / "data"
+    assert not data_dir.exists()
+
+    snapshot = _snapshot_rules(rules, data_dir, "20240101", "20240108")
+
+    assert data_dir.is_dir()
+    assert snapshot.is_file()
+    assert snapshot.read_text(encoding="utf-8") == "constituents: []\n"
