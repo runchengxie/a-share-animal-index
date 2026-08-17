@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import pandas as pd
 
@@ -96,6 +97,19 @@ def _apply_namechange(df: pd.DataFrame, namechange: pd.DataFrame, as_of: str) ->
     return merged.drop(columns=["name_asof"])
 
 
+def _filter_min_listing_age(df: pd.DataFrame, as_of: str, min_listing_days: int) -> pd.DataFrame:
+    if min_listing_days <= 0 or "list_date" not in df.columns:
+        return df.copy()
+    as_of_date = datetime.strptime(as_of, "%Y%m%d").date()
+    list_dates = pd.to_datetime(
+        df["list_date"].astype(str), format="%Y%m%d", errors="coerce"
+    ).dt.date
+    # 上市满 min_listing_days 个自然日才纳入（按真实日历差，非 YYYYMMDD 整数差）。
+    days_listed = [(as_of_date - d).days if pd.notna(d) else 10**9 for d in list_dates]
+    mask = pd.Series(days_listed) >= min_listing_days
+    return df[mask].copy()
+
+
 def prepare_universe_asof(
     stock_basic: pd.DataFrame, namechange: pd.DataFrame, as_of: str, rules: Rules
 ) -> pd.DataFrame:
@@ -103,6 +117,7 @@ def prepare_universe_asof(
     filtered = _apply_namechange(filtered, namechange, as_of)
     filtered = _filter_exchange(filtered, rules.allow_beijing)
     filtered = _filter_st(filtered, rules.exclude_st)
+    filtered = _filter_min_listing_age(filtered, as_of, rules.min_listing_days)
     return filtered
 
 

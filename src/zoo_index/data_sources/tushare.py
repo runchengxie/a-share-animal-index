@@ -211,7 +211,7 @@ class TushareClient:
             df = self._api(
                 "daily",
                 trade_date=trade_date,
-                fields="ts_code,close,pre_close",
+                fields="ts_code,close,pre_close,amount",
             )
             if not df.empty:
                 self._write_cache(cache_path, df)

@@ -401,6 +401,26 @@ def _month_first_open_date(client: TushareLike, date: str, cache: dict[str, str]
     return first_date
 
 
+def _amounts_asof(client: TushareLike, trade_date: str) -> pd.DataFrame:
+    """取再平衡日成交额，用于流动性过滤；无 amount 列时返回空表。"""
+    daily = client.get_daily(trade_date)
+    if daily.empty or "amount" not in daily.columns:
+        return pd.DataFrame(columns=["ts_code", "amount"])
+    return daily[["ts_code", "amount"]].copy()
+
+
+def _filter_by_amount(
+    constituents: pd.DataFrame, amounts: pd.DataFrame, min_daily_amount: float
+) -> pd.DataFrame:
+    if amounts.empty:
+        return constituents
+    merged = constituents.merge(amounts, on="ts_code", how="left")
+    merged["amount"] = pd.to_numeric(merged["amount"], errors="coerce")
+    # 成交额低于门槛或缺失者剔除（缺失视为流动性不足）。
+    filtered = merged[merged["amount"] >= min_daily_amount].copy()
+    return filtered.drop(columns=["amount"])
+
+
 def _get_constituents_for_rebalance(
     cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]],
     stock_basic: pd.DataFrame,
@@ -408,6 +428,7 @@ def _get_constituents_for_rebalance(
     rules,
     rebalance_date: str,
     rules_path: Path | None = None,
+    client: TushareLike | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if rebalance_date in cache:
         return cache[rebalance_date]
@@ -418,6 +439,14 @@ def _get_constituents_for_rebalance(
     strict_df, extended_df = build_constituents(universe, effective_rules)
     if strict_df.empty or extended_df.empty:
         raise ValueError("constituents is empty")
+    # 流动性过滤：按再平衡日成交额剔除低流动性成分。
+    if effective_rules.min_daily_amount > 0 and client is not None:
+        amounts = _amounts_asof(client, rebalance_date)
+        if not amounts.empty:
+            strict_df = _filter_by_amount(strict_df, amounts, effective_rules.min_daily_amount)
+            extended_df = _filter_by_amount(extended_df, amounts, effective_rules.min_daily_amount)
+            if strict_df.empty or extended_df.empty:
+                raise ValueError("constituents is empty after liquidity filter")
     cache[rebalance_date] = (strict_df, extended_df)
     return cache[rebalance_date]
 
@@ -597,6 +626,7 @@ def compute_day(
         rules,
         rebalance_date,
         rules_path=rules_path,
+        client=client,
     )
 
     daily_prices = client.get_daily(date)
