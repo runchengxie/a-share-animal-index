@@ -15,6 +15,32 @@ class IndexStats:
     missing_prices: int
 
 
+@dataclass
+class VariantState:
+    """单一变体（strict / extended）的有状态组合。"""
+
+    weights: dict[str, float]
+    constituents: pd.DataFrame
+    reason: str
+
+
+@dataclass
+class PortfolioState:
+    """双变体组合在某一交易日的快照，供次日计算去前视使用。"""
+
+    date: str
+    strict: VariantState
+    extended: VariantState
+
+
+def _equal_weights(constituents: pd.DataFrame) -> dict[str, float]:
+    codes = constituents["ts_code"].tolist()
+    if not codes:
+        return {}
+    weight = 1.0 / len(codes)
+    return {code: weight for code in codes}
+
+
 def _filter_exchange(df: pd.DataFrame, allow_beijing: bool) -> pd.DataFrame:
     allowed = {"SSE", "SZSE"}
     if allow_beijing:
@@ -126,11 +152,13 @@ def compute_equal_weight_return(
     adj_factors: pd.DataFrame | None = None,
     prev_adj_factors: pd.DataFrame | None = None,
     suspended: set[str] | None = None,
+    weights: dict[str, float] | None = None,
 ) -> tuple[float, pd.DataFrame, IndexStats]:
     if constituents.empty:
         return 0.0, constituents, IndexStats(0, 0, 0)
 
     suspended = suspended or set()
+    stateful = weights is not None
 
     merged = constituents.merge(daily_prices, on="ts_code", how="left")
     merged = merged.merge(
@@ -170,19 +198,32 @@ def compute_equal_weight_return(
         merged.loc[suspended_mask, "close"] = merged.loc[suspended_mask, "prev_close_actual"]
         merged.loc[suspended_mask, "pre_close"] = merged.loc[suspended_mask, "prev_close_actual"]
 
-    # 真实缺失：无行情且非停牌，warning 后排除，不静默当成停牌。
+    # 真实缺失：无行情且非停牌，warning 后排除出收益计算，但权重保留（不静默再分配）。
     genuine_missing = no_price & ~merged["ts_code"].isin(suspended)
     if genuine_missing.any():
         codes = merged.loc[genuine_missing, "ts_code"].tolist()
-        print(f"警告：以下成分无行情且非停牌，已排除出当日指数：{codes}")
+        print(f"警告：以下成分无行情且非停牌，已排除出当日指数收益：{codes}")
+
+    total = len(merged)
+    valid_ret = merged["ret"].notna() & (merged["prev_close_actual"] > 0)
+    priced = int(valid_ret.sum())
+    missing = total - priced
+
+    if stateful:
+        # 月度固定权重：指数收益 = Σ weight_i * ret_i，缺失/停牌成分贡献 0，不重新均分。
+        merged["weight"] = merged["ts_code"].map(weights).fillna(0.0)
+        merged["contrib"] = merged["weight"] * merged["ret"].fillna(0.0)
+        index_return = float(merged["contrib"].sum())
+        holdings = merged[
+            ["ts_code", "name", "keyword", "forced", "weight", "ret", "close", "pre_close"]
+        ].copy()
+        # 缺失成分保留权重，收益记为 0。
+        holdings["ret"] = holdings["ret"].fillna(0.0)
+        return index_return, holdings, IndexStats(total, priced, missing)
 
     valid = merged[~genuine_missing].copy()
     valid = valid.dropna(subset=["ret"])
     valid = valid[valid["prev_close_actual"] > 0]
-
-    total = len(merged)
-    priced = len(valid)
-    missing = total - priced
 
     if priced == 0:
         return 0.0, merged, IndexStats(total, 0, missing)

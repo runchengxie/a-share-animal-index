@@ -8,10 +8,13 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from zoo_index.config import load_rules
+from zoo_index.config import load_rules, load_rules_asof
 from zoo_index.data_sources.tushare import TushareClient, TushareLike
 from zoo_index.index import (
     IndexStats,
+    PortfolioState,
+    VariantState,
+    _equal_weights,
     build_constituents,
     compute_equal_weight_return,
     prepare_universe_asof,
@@ -63,6 +66,7 @@ class DailyResult:
     extended_stats: IndexStats
     benchmark_code: str
     benchmark_label: str
+    state: PortfolioState | None = None
 
 
 @dataclass
@@ -264,6 +268,30 @@ def _find_previous_snapshot(manifests_dir: Path, prefix: str, date: str) -> Path
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def _variant_state_from_holdings(df: pd.DataFrame, variant: str) -> VariantState | None:
+    sub = df[df["variant"] == variant]
+    if sub.empty:
+        return None
+    weights = dict(zip(sub["ts_code"].astype(str), sub["weight"].astype(float), strict=False))
+    constituents = sub[["ts_code", "name", "keyword", "forced"]].copy()
+    constituents["ts_code"] = constituents["ts_code"].astype(str)
+    return VariantState(weights=weights, constituents=constituents, reason="restored")
+
+
+def load_portfolio_state(holdings_path: Path, date: str) -> PortfolioState | None:
+    """从 holdings_{date}.csv 重建双变体组合状态，供单日 run_daily 去前视。"""
+    if not holdings_path.exists():
+        return None
+    df = pd.read_csv(holdings_path, dtype={"ts_code": str})
+    if df.empty or "variant" not in df.columns:
+        return None
+    strict = _variant_state_from_holdings(df, "strict")
+    extended = _variant_state_from_holdings(df, "extended")
+    if strict is None or extended is None:
+        return None
+    return PortfolioState(date=date, strict=strict, extended=extended)
+
+
 def _month_first_open_date(client: TushareLike, date: str, cache: dict[str, str]) -> str:
     month_key = date[:6]
     if month_key in cache:
@@ -285,11 +313,15 @@ def _get_constituents_for_rebalance(
     namechange: pd.DataFrame,
     rules,
     rebalance_date: str,
+    rules_path: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if rebalance_date in cache:
         return cache[rebalance_date]
-    universe = prepare_universe_asof(stock_basic, namechange, rebalance_date, rules)
-    strict_df, extended_df = build_constituents(universe, rules)
+    effective_rules = rules
+    if rules_path is not None:
+        effective_rules = load_rules_asof(rebalance_date, rules_path)
+    universe = prepare_universe_asof(stock_basic, namechange, rebalance_date, effective_rules)
+    strict_df, extended_df = build_constituents(universe, effective_rules)
     if strict_df.empty or extended_df.empty:
         raise ValueError("constituents is empty")
     cache[rebalance_date] = (strict_df, extended_df)
@@ -312,8 +344,14 @@ def compute_day(
     stock_basic: pd.DataFrame,
     namechange: pd.DataFrame,
     constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] | None = None,
+    rules_path: Path | None = None,
+    prev_state: PortfolioState | None = None,
 ) -> DailyResult:
-    """计算指定交易日的双指数收益与成分。daily 与 backfill 共用此函数。"""
+    """计算指定交易日的双指数收益与成分。daily 与 backfill 共用此函数。
+
+    prev_state 为上一交易日组合快照（含固定权重）。无 prev_state 视为建仓首日，
+    当日即用新篮子等权；否则当日收益沿用上一篮子（去前视），新篮子于次日生效。
+    """
     month_cache: dict[str, str] = {}
     rebalance_date = _month_first_open_date(client, date, month_cache)
     strict_df, extended_df = _get_constituents_for_rebalance(
@@ -322,6 +360,7 @@ def compute_day(
         namechange,
         rules,
         rebalance_date,
+        rules_path=rules_path,
     )
 
     daily_prices = client.get_daily(date)
@@ -343,22 +382,88 @@ def compute_day(
     except Exception as exc:
         print(f"获取停牌信息失败，当日按无停牌处理：{exc}")
 
-    strict_ret, strict_holdings, strict_stats = compute_equal_weight_return(
-        strict_df,
-        daily_prices,
-        prev_daily,
-        adj_factors,
-        prev_adj_factors,
-        suspended=suspended,
-    )
-    extended_ret, extended_holdings, extended_stats = compute_equal_weight_return(
-        extended_df,
-        daily_prices,
-        prev_daily,
-        adj_factors,
-        prev_adj_factors,
-        suspended=suspended,
-    )
+    is_new_month = prev_state is None or prev_state.date[:6] != date[:6]
+    is_rebalance = is_new_month
+
+    if prev_state is None:
+        # 建仓首日：无历史篮子，当日即用新篮子等权。
+        strict_weights = _equal_weights(strict_df)
+        extended_weights = _equal_weights(extended_df)
+        strict_ret, strict_holdings, strict_stats = compute_equal_weight_return(
+            strict_df,
+            daily_prices,
+            prev_daily,
+            adj_factors,
+            prev_adj_factors,
+            suspended=suspended,
+            weights=strict_weights,
+        )
+        extended_ret, extended_holdings, extended_stats = compute_equal_weight_return(
+            extended_df,
+            daily_prices,
+            prev_daily,
+            adj_factors,
+            prev_adj_factors,
+            suspended=suspended,
+            weights=extended_weights,
+        )
+        new_strict = VariantState(strict_weights, strict_df, "seed")
+        new_extended = VariantState(extended_weights, extended_df, "seed")
+    else:
+        # 去前视：当日收益沿用上一篮子（含旧权重）。
+        strict_ret, _, strict_stats = compute_equal_weight_return(
+            prev_state.strict.constituents,
+            daily_prices,
+            prev_daily,
+            adj_factors,
+            prev_adj_factors,
+            suspended=suspended,
+            weights=prev_state.strict.weights,
+        )
+        extended_ret, _, extended_stats = compute_equal_weight_return(
+            prev_state.extended.constituents,
+            daily_prices,
+            prev_daily,
+            adj_factors,
+            prev_adj_factors,
+            suspended=suspended,
+            weights=prev_state.extended.weights,
+        )
+        if is_rebalance:
+            # 月度再平衡：新篮子等权，于次日生效；当日快照写新篮子。
+            strict_weights = _equal_weights(strict_df)
+            extended_weights = _equal_weights(extended_df)
+            new_strict = VariantState(strict_weights, strict_df, "monthly")
+            new_extended = VariantState(extended_weights, extended_df, "monthly")
+        else:
+            # 月内持有：沿用上一篮子与权重。
+            new_strict = VariantState(
+                prev_state.strict.weights, prev_state.strict.constituents, prev_state.strict.reason
+            )
+            new_extended = VariantState(
+                prev_state.extended.weights,
+                prev_state.extended.constituents,
+                prev_state.extended.reason,
+            )
+        # 快照写当日生效篮子（再平衡日即新篮子，月内即上一篮子）。
+        _, strict_holdings, _ = compute_equal_weight_return(
+            new_strict.constituents,
+            daily_prices,
+            prev_daily,
+            adj_factors,
+            prev_adj_factors,
+            suspended=suspended,
+            weights=new_strict.weights,
+        )
+        _, extended_holdings, _ = compute_equal_weight_return(
+            new_extended.constituents,
+            daily_prices,
+            prev_daily,
+            adj_factors,
+            prev_adj_factors,
+            suspended=suspended,
+            weights=new_extended.weights,
+        )
 
     if strict_stats.priced_constituents == 0 or extended_stats.priced_constituents == 0:
         raise ValueError(f"{date} 成分股行情为空，无法计算指数。")
@@ -370,6 +475,8 @@ def compute_day(
         benchmark,
         daily_prices=daily_prices,
     )
+
+    new_state = PortfolioState(date=date, strict=new_strict, extended=new_extended)
 
     return DailyResult(
         date=date,
@@ -384,6 +491,7 @@ def compute_day(
         extended_stats=extended_stats,
         benchmark_code=benchmark.code,
         benchmark_label=benchmark.label,
+        state=new_state,
     )
 
 
@@ -453,6 +561,21 @@ def _write_changes_snapshot(
     generate_changes_json(data_dir / "changes.json", date, changes, suspected_noise)
 
 
+def _load_prev_state_for_daily(
+    client: TushareLike, date: str, manifests_dir: Path
+) -> PortfolioState | None:
+    """为单日 run_daily 从上一交易日 holdings 快照重建组合状态（去前视）。"""
+    try:
+        prev_date = _resolve_previous_open_date(client, date)
+    except Exception as exc:
+        print(f"重建上一日状态失败，按建仓首日处理：{exc}")
+        return None
+    prev_holdings = manifests_dir / f"holdings_{prev_date}.csv"
+    if not prev_holdings.exists():
+        return None
+    return load_portfolio_state(prev_holdings, prev_date)
+
+
 def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
     if client is None:
         client = _build_client(config)
@@ -495,8 +618,20 @@ def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
         print(f"获取股票列表失败：{exc}")
         return 1
 
+    # 重建上一交易日组合状态（去前视）：从 holdings_{prev_date}.csv 读取固定权重。
+    prev_state = _load_prev_state_for_daily(client, date, manifests_dir)
+
     try:
-        result = compute_day(client, rules, config.benchmark, date, stock_basic, namechange)
+        result = compute_day(
+            client,
+            rules,
+            config.benchmark,
+            date,
+            stock_basic,
+            namechange,
+            rules_path=config.rules_path,
+            prev_state=prev_state,
+        )
     except Exception as exc:
         print(f"计算指数失败（{date}）：{exc}")
         return 1
@@ -538,14 +673,25 @@ def _backfill_run_days(
     namechange: pd.DataFrame,
     output_dir: Path,
     write_snapshots: bool,
+    rules_path: Path | None = None,
+    prev_state: PortfolioState | None = None,
 ) -> tuple[list[dict], DailyResult | None]:
     constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
     ret_rows: list[dict] = []
     last_result: DailyResult | None = None
+    state = prev_state
 
     for trade_date in run_dates:
         result = compute_day(
-            client, rules, benchmark, trade_date, stock_basic, namechange, constituents_cache
+            client,
+            rules,
+            benchmark,
+            trade_date,
+            stock_basic,
+            namechange,
+            constituents_cache,
+            rules_path=rules_path,
+            prev_state=state,
         )
         ret_rows.append(
             {
@@ -555,12 +701,15 @@ def _backfill_run_days(
                 "benchmark_ret": result.benchmark_ret,
             }
         )
+        # 每日写入 holdings 快照，供后续 run_daily 重建状态（去前视）。
+        save_holdings(
+            (output_dir / "manifests") / f"holdings_{trade_date}.csv",
+            result.strict_holdings,
+            result.extended_holdings,
+        )
         if write_snapshots:
-            save_holdings(
-                (output_dir / "manifests") / f"holdings_{trade_date}.csv",
-                result.strict_holdings,
-                result.extended_holdings,
-            )
+            pass
+        state = result.state
         last_result = result
         print(
             "回填："
@@ -678,6 +827,14 @@ def run_backfill(config: RunConfig, client: TushareLike | None = None) -> int:
         return 1
 
     try:
+        prev_state: PortfolioState | None = None
+        first_prev_path = _find_previous_snapshot(
+            output_dir / "manifests", "holdings", run_dates[0]
+        )
+        if first_prev_path is not None:
+            prev_date = first_prev_path.stem[len("holdings_") :]
+            prev_state = load_portfolio_state(first_prev_path, prev_date)
+
         ret_rows, last_result = _backfill_run_days(
             client,
             rules,
@@ -687,6 +844,8 @@ def run_backfill(config: RunConfig, client: TushareLike | None = None) -> int:
             namechange,
             output_dir,
             config.backfill_write_snapshots,
+            rules_path=config.rules_path,
+            prev_state=prev_state,
         )
     except Exception as exc:
         print(f"回填计算失败：{exc}")
