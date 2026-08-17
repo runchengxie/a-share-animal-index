@@ -14,6 +14,7 @@ from zoo_index.index import (
     IndexStats,
     PortfolioState,
     VariantState,
+    _apply_namechange,
     _equal_weights,
     build_constituents,
     compute_equal_weight_return,
@@ -275,7 +276,24 @@ def _variant_state_from_holdings(df: pd.DataFrame, variant: str) -> VariantState
     weights = dict(zip(sub["ts_code"].astype(str), sub["weight"].astype(float), strict=False))
     constituents = sub[["ts_code", "name", "keyword", "forced"]].copy()
     constituents["ts_code"] = constituents["ts_code"].astype(str)
-    return VariantState(weights=weights, constituents=constituents, reason="restored")
+    if "susp_days" in sub.columns:
+        susp_days = dict(
+            zip(sub["ts_code"].astype(str), sub["susp_days"].astype(int), strict=False)
+        )
+    else:
+        susp_days = {}
+    return VariantState(
+        weights=weights, constituents=constituents, reason="restored", susp_days=susp_days
+    )
+
+
+def _attach_susp_days(holdings: pd.DataFrame, streak: dict[str, int]) -> pd.DataFrame:
+    """将停牌连续天数写入 holdings 快照，供 run_daily 重建状态。"""
+    holdings = holdings.copy()
+    holdings["susp_days"] = (
+        holdings["ts_code"].map(lambda code: streak.get(str(code), 0)).astype(int)
+    )
+    return holdings
 
 
 def load_portfolio_state(holdings_path: Path, date: str) -> PortfolioState | None:
@@ -290,6 +308,57 @@ def load_portfolio_state(holdings_path: Path, date: str) -> PortfolioState | Non
     if strict is None or extended is None:
         return None
     return PortfolioState(date=date, strict=strict, extended=extended)
+
+
+def _anomalous_codes(
+    held: pd.DataFrame,
+    stock_basic: pd.DataFrame,
+    namechange: pd.DataFrame,
+    date: str,
+    suspended: set[str],
+    prev_streak: dict[str, int],
+    max_susp_days: int,
+) -> tuple[set[str], dict[str, int]]:
+    """检测持有成分中的异常，返回需剔除的代码与更新后的停牌连续天数。
+
+    异常三类：(1) 截至当日已退市（delist_date <= date）；(2) 当日名称含 ST；
+    (3) 连续停牌达到 max_susp_days（跨日累计，max_susp_days<=0 时关闭）。
+    """
+    if held.empty:
+        return set(), {}
+
+    current = _apply_namechange(held[["ts_code", "name"]], namechange, date)
+    name_map = (
+        dict(zip(current["ts_code"], current["name"], strict=False)) if not current.empty else {}
+    )
+
+    delist: dict[str, int] = {}
+    if "delist_date" in stock_basic.columns:
+        sb = stock_basic.set_index("ts_code")
+        for code in held["ts_code"]:
+            if code in sb.index:
+                value = pd.to_numeric(sb.loc[code, "delist_date"], errors="coerce")
+                delist[code] = 99999999 if pd.isna(value) else int(value)
+
+    as_of = int(date)
+    new_streak: dict[str, int] = {}
+    anomalies: set[str] = set()
+    for code in held["ts_code"]:
+        streak = prev_streak.get(code, 0)
+        streak = streak + 1 if code in suspended else 0
+        new_streak[code] = streak
+
+        delist_date = delist.get(code, 99999999)
+        if delist_date <= as_of:
+            anomalies.add(code)
+            continue
+        name = name_map.get(code, "")
+        if isinstance(name, str) and "ST" in name:
+            anomalies.add(code)
+            continue
+        if max_susp_days > 0 and streak >= max_susp_days:
+            anomalies.add(code)
+    return anomalies, new_streak
 
 
 def _month_first_open_date(client: TushareLike, date: str, cache: dict[str, str]) -> str:
@@ -334,6 +403,148 @@ def _build_nav_from_returns(ret_df: pd.DataFrame) -> pd.DataFrame:
     nav_df["zoo_extended_nav"] = (1 + nav_df["zoo_extended_ret"]).cumprod()
     nav_df["benchmark_nav"] = (1 + nav_df["benchmark_ret"]).cumprod()
     return nav_df
+
+
+def _resolve_day_variants(
+    held_strict: pd.DataFrame,
+    held_w_strict: dict[str, float],
+    held_extended: pd.DataFrame,
+    held_w_extended: dict[str, float],
+    prev_state: PortfolioState | None,
+    is_rebalance: bool,
+    month_strict: pd.DataFrame,
+    month_extended: pd.DataFrame,
+    strict_anom: set[str],
+    extended_anom: set[str],
+    daily_prices: pd.DataFrame,
+    prev_daily: pd.DataFrame,
+    adj_factors: pd.DataFrame,
+    prev_adj_factors: pd.DataFrame,
+    suspended: set[str],
+) -> tuple[
+    float,
+    pd.DataFrame,
+    IndexStats,
+    pd.DataFrame,
+    dict[str, float],
+    str,
+    float,
+    pd.DataFrame,
+    IndexStats,
+    pd.DataFrame,
+    dict[str, float],
+    str,
+]:
+    """计算双变体当日收益与快照，并返回下一状态的组合信息。
+
+    异常再平衡（anom 非空）优先：剔除触发成分、对剩余重新等权、当日生效；
+    否则按 seed / 月度再平衡（去前视）/ 月内持有 三种情形处理。
+    """
+
+    def _resolve_variant(
+        held: pd.DataFrame,
+        held_weights: dict[str, float],
+        prev_variant: VariantState | None,
+        month_basket: pd.DataFrame,
+        anom: set[str],
+    ) -> tuple[float, pd.DataFrame, IndexStats, pd.DataFrame, dict[str, float], str]:
+        if anom:
+            reduced = held[~held["ts_code"].isin(anom)].copy()
+            new_weights = _equal_weights(reduced)
+            ret, holdings, stats = compute_equal_weight_return(
+                reduced,
+                daily_prices,
+                prev_daily,
+                adj_factors,
+                prev_adj_factors,
+                suspended=suspended,
+                weights=new_weights,
+            )
+            return ret, holdings, stats, reduced, new_weights, "exception"
+        if prev_variant is None:
+            ret, holdings, stats = compute_equal_weight_return(
+                held,
+                daily_prices,
+                prev_daily,
+                adj_factors,
+                prev_adj_factors,
+                suspended=suspended,
+                weights=held_weights,
+            )
+            return ret, holdings, stats, held, held_weights, "seed"
+        if is_rebalance:
+            ret, _, stats = compute_equal_weight_return(
+                held,
+                daily_prices,
+                prev_daily,
+                adj_factors,
+                prev_adj_factors,
+                suspended=suspended,
+                weights=held_weights,
+            )
+            _, holdings, _ = compute_equal_weight_return(
+                month_basket,
+                daily_prices,
+                prev_daily,
+                adj_factors,
+                prev_adj_factors,
+                suspended=suspended,
+                weights=_equal_weights(month_basket),
+            )
+            return ret, holdings, stats, month_basket, _equal_weights(month_basket), "monthly"
+        ret, holdings, stats = compute_equal_weight_return(
+            held,
+            daily_prices,
+            prev_daily,
+            adj_factors,
+            prev_adj_factors,
+            suspended=suspended,
+            weights=held_weights,
+        )
+        return ret, holdings, stats, held, held_weights, prev_variant.reason
+
+    (
+        strict_ret,
+        strict_holdings,
+        strict_stats,
+        strict_new_const,
+        strict_new_weights,
+        strict_reason,
+    ) = _resolve_variant(
+        held_strict,
+        held_w_strict,
+        prev_state.strict if prev_state else None,
+        month_strict,
+        strict_anom,
+    )
+    (
+        extended_ret,
+        extended_holdings,
+        extended_stats,
+        extended_new_const,
+        extended_new_weights,
+        extended_reason,
+    ) = _resolve_variant(
+        held_extended,
+        held_w_extended,
+        prev_state.extended if prev_state else None,
+        month_extended,
+        extended_anom,
+    )
+    return (
+        strict_ret,
+        strict_holdings,
+        strict_stats,
+        strict_new_const,
+        strict_new_weights,
+        strict_reason,
+        extended_ret,
+        extended_holdings,
+        extended_stats,
+        extended_new_const,
+        extended_new_weights,
+        extended_reason,
+    )
 
 
 def compute_day(
@@ -384,86 +595,80 @@ def compute_day(
 
     is_new_month = prev_state is None or prev_state.date[:6] != date[:6]
     is_rebalance = is_new_month
+    max_susp_days = getattr(rules, "max_suspension_days", 0)
 
+    # 当日持有篮子（held）：seed 用当月篮子；否则上一日状态篮子。
     if prev_state is None:
-        # 建仓首日：无历史篮子，当日即用新篮子等权。
-        strict_weights = _equal_weights(strict_df)
-        extended_weights = _equal_weights(extended_df)
-        strict_ret, strict_holdings, strict_stats = compute_equal_weight_return(
-            strict_df,
-            daily_prices,
-            prev_daily,
-            adj_factors,
-            prev_adj_factors,
-            suspended=suspended,
-            weights=strict_weights,
-        )
-        extended_ret, extended_holdings, extended_stats = compute_equal_weight_return(
-            extended_df,
-            daily_prices,
-            prev_daily,
-            adj_factors,
-            prev_adj_factors,
-            suspended=suspended,
-            weights=extended_weights,
-        )
-        new_strict = VariantState(strict_weights, strict_df, "seed")
-        new_extended = VariantState(extended_weights, extended_df, "seed")
+        held_strict, held_w_strict = strict_df, _equal_weights(strict_df)
+        held_extended, held_w_extended = extended_df, _equal_weights(extended_df)
     else:
-        # 去前视：当日收益沿用上一篮子（含旧权重）。
-        strict_ret, _, strict_stats = compute_equal_weight_return(
-            prev_state.strict.constituents,
-            daily_prices,
-            prev_daily,
-            adj_factors,
-            prev_adj_factors,
-            suspended=suspended,
-            weights=prev_state.strict.weights,
-        )
-        extended_ret, _, extended_stats = compute_equal_weight_return(
+        held_strict, held_w_strict = prev_state.strict.constituents, prev_state.strict.weights
+        held_extended, held_w_extended = (
             prev_state.extended.constituents,
-            daily_prices,
-            prev_daily,
-            adj_factors,
-            prev_adj_factors,
-            suspended=suspended,
-            weights=prev_state.extended.weights,
+            prev_state.extended.weights,
         )
-        if is_rebalance:
-            # 月度再平衡：新篮子等权，于次日生效；当日快照写新篮子。
-            strict_weights = _equal_weights(strict_df)
-            extended_weights = _equal_weights(extended_df)
-            new_strict = VariantState(strict_weights, strict_df, "monthly")
-            new_extended = VariantState(extended_weights, extended_df, "monthly")
-        else:
-            # 月内持有：沿用上一篮子与权重。
-            new_strict = VariantState(
-                prev_state.strict.weights, prev_state.strict.constituents, prev_state.strict.reason
-            )
-            new_extended = VariantState(
-                prev_state.extended.weights,
-                prev_state.extended.constituents,
-                prev_state.extended.reason,
-            )
-        # 快照写当日生效篮子（再平衡日即新篮子，月内即上一篮子）。
-        _, strict_holdings, _ = compute_equal_weight_return(
-            new_strict.constituents,
-            daily_prices,
-            prev_daily,
-            adj_factors,
-            prev_adj_factors,
-            suspended=suspended,
-            weights=new_strict.weights,
-        )
-        _, extended_holdings, _ = compute_equal_weight_return(
-            new_extended.constituents,
-            daily_prices,
-            prev_daily,
-            adj_factors,
-            prev_adj_factors,
-            suspended=suspended,
-            weights=new_extended.weights,
-        )
+
+    # 异常检测（退市 / ST / 长期停牌），并累计停牌连续天数。
+    strict_anom, strict_streak = _anomalous_codes(
+        held_strict,
+        stock_basic,
+        namechange,
+        date,
+        suspended,
+        prev_state.strict.susp_days if prev_state else {},
+        max_susp_days,
+    )
+    extended_anom, extended_streak = _anomalous_codes(
+        held_extended,
+        stock_basic,
+        namechange,
+        date,
+        suspended,
+        prev_state.extended.susp_days if prev_state else {},
+        max_susp_days,
+    )
+
+    (
+        strict_ret,
+        strict_holdings,
+        strict_stats,
+        strict_new_const,
+        strict_new_weights,
+        strict_reason,
+        extended_ret,
+        extended_holdings,
+        extended_stats,
+        extended_new_const,
+        extended_new_weights,
+        extended_reason,
+    ) = _resolve_day_variants(
+        held_strict,
+        held_w_strict,
+        held_extended,
+        held_w_extended,
+        prev_state,
+        is_rebalance,
+        strict_df,
+        extended_df,
+        strict_anom,
+        extended_anom,
+        daily_prices,
+        prev_daily,
+        adj_factors,
+        prev_adj_factors,
+        suspended,
+    )
+
+    # 剔除成分从停牌计数中清除，避免跨月误累计。
+    strict_streak = {c: v for c, v in strict_streak.items() if c not in strict_anom}
+    extended_streak = {c: v for c, v in extended_streak.items() if c not in extended_anom}
+    strict_holdings = _attach_susp_days(strict_holdings, strict_streak)
+    extended_holdings = _attach_susp_days(extended_holdings, extended_streak)
+
+    new_strict = VariantState(strict_new_weights, strict_new_const, strict_reason, strict_streak)
+    new_extended = VariantState(
+        extended_new_weights, extended_new_const, extended_reason, extended_streak
+    )
 
     if strict_stats.priced_constituents == 0 or extended_stats.priced_constituents == 0:
         raise ValueError(f"{date} 成分股行情为空，无法计算指数。")

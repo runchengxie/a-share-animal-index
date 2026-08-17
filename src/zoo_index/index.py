@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -22,6 +22,7 @@ class VariantState:
     weights: dict[str, float]
     constituents: pd.DataFrame
     reason: str
+    susp_days: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
