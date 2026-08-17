@@ -1,0 +1,231 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from zoo_index.config import Rules, load_rules
+from zoo_index.data_sources.tushare import TradeCalendarEntry
+from zoo_index.runner import (
+    BenchmarkConfig,
+    RunConfig,
+    compute_day,
+    run_backfill,
+    run_daily,
+)
+
+
+class FakeClient:
+    """内存版 Tushare 客户端，仅供测试，不发起任何网络请求。"""
+
+    def __init__(self, open_dates: list[str], prices: dict[str, tuple[float, float]]) -> None:
+        self.open_dates = open_dates
+        self.prices = prices
+        self.benchmark_code = "000300.SH"
+
+    def _price_row(self, ts_code: str) -> dict:
+        close, pre_close = self.prices.get(ts_code, (1.0, 1.0))
+        return {"ts_code": ts_code, "close": close, "pre_close": pre_close}
+
+    def get_trade_calendar(self, date: str) -> TradeCalendarEntry:
+        return TradeCalendarEntry(date=date, is_open=date in self.open_dates)
+
+    def get_trade_calendar_range(self, start_date: str, end_date: str) -> pd.DataFrame:
+        rows = [
+            {"cal_date": d, "is_open": 1} for d in self.open_dates if start_date <= d <= end_date
+        ]
+        return pd.DataFrame(rows)
+
+    def get_recent_open_dates(
+        self, end_date: str, count: int, lookback_days: int | None = None
+    ) -> list[str]:
+        if count <= 0:
+            raise ValueError("count must be positive")
+        dates = [d for d in self.open_dates if d <= end_date]
+        if len(dates) < count:
+            raise ValueError("no open trading day found")
+        return dates[-count:]
+
+    def get_stock_basic(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "name": "金龙鱼",
+                    "exchange": "SZSE",
+                    "list_date": 20200101,
+                    "delist_date": 99999999,
+                },
+                {
+                    "ts_code": "600000.SH",
+                    "name": "熊猫",
+                    "exchange": "SSE",
+                    "list_date": 20200101,
+                    "delist_date": 99999999,
+                },
+                {
+                    "ts_code": "000002.SZ",
+                    "name": "马钢",
+                    "exchange": "SSE",
+                    "list_date": 20200101,
+                    "delist_date": 99999999,
+                },
+                {
+                    "ts_code": "000003.SZ",
+                    "name": "龙湖",
+                    "exchange": "SZSE",
+                    "list_date": 20200101,
+                    "delist_date": 99999999,
+                },
+                {
+                    "ts_code": "000004.SZ",
+                    "name": "中国银行",
+                    "exchange": "SZSE",
+                    "list_date": 20200101,
+                    "delist_date": 99999999,
+                },
+            ]
+        )
+
+    def get_namechange(self) -> pd.DataFrame:
+        return pd.DataFrame(columns=["ts_code", "name", "start_date", "end_date"])  # ty: ignore[invalid-argument-type]
+
+    def get_daily(self, trade_date: str) -> pd.DataFrame:
+        return pd.DataFrame([self._price_row(code) for code in self.prices])
+
+    def get_adj_factor(self, trade_date: str) -> pd.DataFrame:
+        return pd.DataFrame([{"ts_code": code, "adj_factor": 1.0} for code in self.prices])
+
+    def get_index_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+        return pd.DataFrame([{"ts_code": ts_code, "close": 1.01, "pre_close": 1.0}])
+
+    def get_fund_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+        return pd.DataFrame([{"ts_code": ts_code, "close": 1.01, "pre_close": 1.0}])
+
+    def get_fund_adj(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+        return pd.DataFrame([{"ts_code": ts_code, "adj_factor": 1.0}])
+
+
+def _rules() -> Rules:
+    return load_rules(Path(__file__).resolve().parent.parent / "rules.yml")
+
+
+def _rules_with_forces(
+    force_include: tuple[str, ...] = (), force_exclude: tuple[str, ...] = ()
+) -> Rules:
+    base = _rules()
+    return Rules(
+        strict_keywords=base.strict_keywords,
+        extended_keywords=base.extended_keywords,
+        exclude_patterns=base.exclude_patterns,
+        force_include=force_include,
+        force_exclude=force_exclude,
+        exclude_st=base.exclude_st,
+        allow_beijing=base.allow_beijing,
+    )
+
+
+def _make_client() -> FakeClient:
+    open_dates = ["20231229", "20240102", "20240103", "20240104", "20240105", "20240108"]
+    prices = {
+        "000001.SZ": (11.0, 10.0),
+        "600000.SH": (10.5, 10.0),
+        "000002.SZ": (10.0, 10.0),
+        "000003.SZ": (10.0, 10.0),
+        "000004.SZ": (10.5, 10.0),
+    }
+    return FakeClient(open_dates, prices)
+
+
+def _benchmark(source: str = "index") -> BenchmarkConfig:
+    return BenchmarkConfig(code="000300.SH", source=source, label="HS300")
+
+
+def test_compute_day_matches_animal_words_and_force_lists() -> None:
+    client = _make_client()
+    rules = _rules_with_forces(force_include=("000004.SZ",), force_exclude=("600000.SH",))
+    result = compute_day(
+        client, rules, _benchmark(), "20240103", client.get_stock_basic(), client.get_namechange()
+    )
+
+    strict_codes = set(result.strict_df["ts_code"])
+    extended_codes = set(result.extended_df["ts_code"])
+    # 金龙鱼命中；中国银行经 force_include 纳入；熊猫经 force_exclude 剔除；马钢/龙湖被排除项过滤。
+    assert strict_codes == {"000001.SZ", "000004.SZ"}
+    assert extended_codes == {"000001.SZ", "000004.SZ"}
+    assert "600000.SH" not in strict_codes
+
+    # 金龙鱼 +10%，中国银行 +5%，等权平均 +7.5%。
+    assert result.strict_ret == pytest.approx(0.075)
+    assert result.extended_ret == pytest.approx(0.075)
+    # 指数基准 +1%。
+    assert result.benchmark_ret == pytest.approx(0.01)
+
+
+def test_run_daily_writes_benchmark_named_outputs(tmp_path: Path) -> None:
+    client = _make_client()
+    config = RunConfig(
+        repo_root=tmp_path,
+        output_dir=tmp_path,
+        rules_path=Path(__file__).resolve().parent.parent / "rules.yml",
+        token="dummy",
+        benchmark=_benchmark(),
+        date="20240103",
+    )
+    assert run_daily(config, client) == 0
+
+    nav = pd.read_csv(tmp_path / "nav.csv")
+    assert "benchmark_ret" in nav.columns
+    assert "benchmark_nav" in nav.columns
+    assert "hs300_ret" not in nav.columns
+
+    latest = __import__("json").loads((tmp_path / "latest.json").read_text(encoding="utf-8"))
+    assert latest["benchmark_nav"] == pytest.approx(1.01, rel=1e-6)
+    assert (tmp_path / "constituents.json").exists()
+    assert (tmp_path / "metadata.json").exists()
+    assert (tmp_path / "history.json").exists()
+
+
+def test_run_backfill_then_missing_is_idempotent(tmp_path: Path) -> None:
+    client = _make_client()
+    rules_path = Path(__file__).resolve().parent.parent / "rules.yml"
+
+    def _config() -> RunConfig:
+        return RunConfig(
+            repo_root=tmp_path,
+            output_dir=tmp_path,
+            rules_path=rules_path,
+            token="dummy",
+            benchmark=_benchmark(),
+            date="20240108",
+            backfill_requested=True,
+            backfill_days=4,
+        )
+
+    assert run_backfill(_config(), client) == 0
+    nav = pd.read_csv(tmp_path / "nav.csv")
+    assert len(nav) == 4
+    assert "benchmark_ret" in nav.columns
+
+    # 再次以 missing 模式运行，区间已存在，应直接跳过。
+    assert run_backfill(_config(), client) == 0
+
+
+def test_run_backfill_all_mode_recomputes(tmp_path: Path) -> None:
+    client = _make_client()
+    rules_path = Path(__file__).resolve().parent.parent / "rules.yml"
+    config = RunConfig(
+        repo_root=tmp_path,
+        output_dir=tmp_path,
+        rules_path=rules_path,
+        token="dummy",
+        benchmark=_benchmark(),
+        date="20240108",
+        backfill_requested=True,
+        backfill_days=4,
+        backfill_mode="all",
+    )
+    assert run_backfill(config, client) == 0
+    nav = pd.read_csv(tmp_path / "nav.csv")
+    assert len(nav) == 4

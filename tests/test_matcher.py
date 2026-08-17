@@ -3,17 +3,15 @@ from zoo_index.matcher import Matcher
 
 
 def _rules(**overrides) -> Rules:
-    base = dict(
-        strict_keywords=("CATFISH", "CAT"),
-        extended_keywords=("CATFISH", "CAT"),
-        exclude_patterns=(),
-        force_include=(),
-        force_exclude=(),
-        exclude_st=False,
-        allow_beijing=True,
+    return Rules(
+        strict_keywords=tuple(overrides.get("strict_keywords", ("CATFISH", "CAT"))),
+        extended_keywords=tuple(overrides.get("extended_keywords", ("CATFISH", "CAT"))),
+        exclude_patterns=tuple(overrides.get("exclude_patterns", ())),
+        force_include=tuple(overrides.get("force_include", ())),
+        force_exclude=tuple(overrides.get("force_exclude", ())),
+        exclude_st=bool(overrides.get("exclude_st", False)),
+        allow_beijing=bool(overrides.get("allow_beijing", True)),
     )
-    base.update(overrides)
-    return Rules(**base)
 
 
 def test_matcher_prefers_longest_keyword() -> None:
