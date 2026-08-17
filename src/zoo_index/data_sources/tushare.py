@@ -31,6 +31,7 @@ class TushareLike(Protocol):
     def get_index_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame: ...
     def get_fund_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame: ...
     def get_fund_adj(self, trade_date: str, ts_code: str) -> pd.DataFrame: ...
+    def get_suspension(self, trade_date: str) -> pd.DataFrame: ...
 
 
 class TushareClient:
@@ -298,3 +299,20 @@ class TushareClient:
             last = df
             time.sleep(0.6 * (2**attempt))
         return last
+
+    def get_suspension(self, trade_date: str) -> pd.DataFrame:
+        cache_path = self._cache_path("suspension", f"{trade_date}.parquet")
+        cached = self._read_cache(cache_path)
+        if cached is not None:
+            return cached
+        df = self._api(
+            "suspend_d",
+            trade_date=trade_date,
+            fields="ts_code,suspend_date,suspend_type",
+        )
+        if df.empty:
+            self._write_cache(cache_path, df)
+            return df
+        df = df.drop_duplicates(subset=["ts_code"])
+        self._write_cache(cache_path, df)
+        return df

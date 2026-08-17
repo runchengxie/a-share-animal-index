@@ -173,27 +173,10 @@ def _resolve_previous_open_date(client: TushareLike, trade_date: str) -> str:
     return recent[-2]
 
 
-def _compute_adjusted_return(
-    close: float,
-    pre_close: float,
-    adj_factor: float,
-    prev_adj_factor: float,
-) -> float:
+def _compute_benchmark_daily_return(close: float, pre_close: float) -> float:
     if pre_close <= 0:
-        raise ValueError("pre_close must be positive")
-    if adj_factor <= 0 or prev_adj_factor <= 0:
-        raise ValueError("adj_factor must be positive")
-    return close / pre_close * (adj_factor / prev_adj_factor) - 1
-
-
-def _require_adj_pair(adj_today: pd.DataFrame, adj_prev: pd.DataFrame) -> tuple[float, float]:
-    if adj_today.empty or adj_prev.empty:
-        raise ValueError("基准复权因子缺失")
-    today_value = adj_today.iloc[0]["adj_factor"]
-    prev_value = adj_prev.iloc[0]["adj_factor"]
-    if pd.isna(today_value) or pd.isna(prev_value):
-        raise ValueError("基准复权因子缺失")
-    return float(today_value), float(prev_value)
+        raise ValueError("基准前收异常")
+    return close / pre_close - 1
 
 
 def _index_benchmark_return(client: TushareLike, trade_date: str, code: str) -> float:
@@ -201,37 +184,26 @@ def _index_benchmark_return(client: TushareLike, trade_date: str, code: str) -> 
     if df.empty:
         raise ValueError("基准行情为空")
     row = df.iloc[0]
-    if pd.isna(row["pre_close"]) or float(row["pre_close"]) <= 0:
+    if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
-    return float(row["close"] / row["pre_close"] - 1)
+    return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
 
 
-def _fund_benchmark_return(
-    client: TushareLike, trade_date: str, prev_date: str, code: str
-) -> float:
+def _fund_benchmark_return(client: TushareLike, trade_date: str, code: str) -> float:
     df = client.get_fund_daily(trade_date, code)
     if df.empty:
         raise ValueError("基准行情为空")
     row = df.iloc[0]
-    if pd.isna(row["pre_close"]) or float(row["pre_close"]) <= 0:
+    if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
-    adj_today, adj_prev = _require_adj_pair(
-        client.get_fund_adj(trade_date, code),
-        client.get_fund_adj(prev_date, code),
-    )
-    return _compute_adjusted_return(
-        float(row["close"]), float(row["pre_close"]), adj_today, adj_prev
-    )
+    return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
 
 
 def _stock_benchmark_return(
     client: TushareLike,
     trade_date: str,
-    prev_date: str,
     code: str,
     daily_prices: pd.DataFrame | None,
-    adj_factors: pd.DataFrame | None,
-    prev_adj_factors: pd.DataFrame | None,
 ) -> float:
     if daily_prices is None:
         daily_prices = client.get_daily(trade_date)
@@ -239,18 +211,9 @@ def _stock_benchmark_return(
     if row_slice.empty:
         raise ValueError("基准行情为空")
     row = row_slice.iloc[0]
-    if pd.isna(row["pre_close"]) or float(row["pre_close"]) <= 0:
+    if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
-    if adj_factors is None:
-        adj_factors = client.get_adj_factor(trade_date)
-    if prev_adj_factors is None:
-        prev_adj_factors = client.get_adj_factor(prev_date)
-    adj_today = adj_factors[adj_factors["ts_code"] == code]
-    adj_prev = prev_adj_factors[prev_adj_factors["ts_code"] == code]
-    adj_today_value, adj_prev_value = _require_adj_pair(adj_today, adj_prev)
-    return _compute_adjusted_return(
-        float(row["close"]), float(row["pre_close"]), adj_today_value, adj_prev_value
-    )
+    return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
 
 
 def _get_benchmark_return(
@@ -259,19 +222,15 @@ def _get_benchmark_return(
     prev_date: str,
     benchmark: BenchmarkConfig,
     daily_prices: pd.DataFrame | None = None,
-    adj_factors: pd.DataFrame | None = None,
-    prev_adj_factors: pd.DataFrame | None = None,
 ) -> float:
     source = benchmark.source
     code = benchmark.code
     if source == "index":
         return _index_benchmark_return(client, trade_date, code)
     if source == "fund":
-        return _fund_benchmark_return(client, trade_date, prev_date, code)
+        return _fund_benchmark_return(client, trade_date, code)
     if source == "stock":
-        return _stock_benchmark_return(
-            client, trade_date, prev_date, code, daily_prices, adj_factors, prev_adj_factors
-        )
+        return _stock_benchmark_return(client, trade_date, code, daily_prices)
     raise ValueError(f"unknown benchmark source: {source}")
 
 
@@ -375,11 +334,30 @@ def compute_day(
     if adj_factors.empty or prev_adj_factors.empty:
         raise ValueError(f"{date} 复权因子为空，无法计算指数。")
 
+    prev_daily = client.get_daily(prev_date)
+    suspended: set[str] = set()
+    try:
+        suspension_df = client.get_suspension(date)
+        if not suspension_df.empty and "ts_code" in suspension_df.columns:
+            suspended = set(suspension_df["ts_code"].astype(str).tolist())
+    except Exception as exc:
+        print(f"获取停牌信息失败，当日按无停牌处理：{exc}")
+
     strict_ret, strict_holdings, strict_stats = compute_equal_weight_return(
-        strict_df, daily_prices, adj_factors, prev_adj_factors
+        strict_df,
+        daily_prices,
+        prev_daily,
+        adj_factors,
+        prev_adj_factors,
+        suspended=suspended,
     )
     extended_ret, extended_holdings, extended_stats = compute_equal_weight_return(
-        extended_df, daily_prices, adj_factors, prev_adj_factors
+        extended_df,
+        daily_prices,
+        prev_daily,
+        adj_factors,
+        prev_adj_factors,
+        suspended=suspended,
     )
 
     if strict_stats.priced_constituents == 0 or extended_stats.priced_constituents == 0:
@@ -391,8 +369,6 @@ def compute_day(
         prev_date,
         benchmark,
         daily_prices=daily_prices,
-        adj_factors=adj_factors,
-        prev_adj_factors=prev_adj_factors,
     )
 
     return DailyResult(
@@ -451,12 +427,14 @@ def _write_changes_snapshot(
     date: str,
     strict_df: pd.DataFrame,
     extended_df: pd.DataFrame,
+    strict_holdings: pd.DataFrame,
+    extended_holdings: pd.DataFrame,
 ) -> None:
     constituents_path = output_dir / f"constituents_{date}.csv"
     today_constituents = save_constituents(constituents_path, strict_df, extended_df)
 
     holdings_path = output_dir / f"holdings_{date}.csv"
-    save_holdings(holdings_path, strict_df, extended_df)
+    save_holdings(holdings_path, strict_holdings, extended_holdings)
 
     previous_constituents_path = _find_previous_snapshot(output_dir, "constituents", date)
     previous_constituents = (
@@ -526,7 +504,14 @@ def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
         result.benchmark_ret,
     )
 
-    _write_changes_snapshot(config.output_dir, result.date, result.strict_df, result.extended_df)
+    _write_changes_snapshot(
+        config.output_dir,
+        result.date,
+        result.strict_df,
+        result.extended_df,
+        result.strict_holdings,
+        result.extended_holdings,
+    )
     _write_public_outputs(config.output_dir, nav_df, latest, result, config.benchmark.source)
 
     print(
@@ -629,7 +614,12 @@ def _write_backfill_outputs(
     latest = nav_df.iloc[-1]
 
     _write_changes_snapshot(
-        output_dir, last_result.date, last_result.strict_df, last_result.extended_df
+        output_dir,
+        last_result.date,
+        last_result.strict_df,
+        last_result.extended_df,
+        last_result.strict_holdings,
+        last_result.extended_holdings,
     )
     _write_public_outputs(output_dir, nav_df, latest, last_result, benchmark_source)
 

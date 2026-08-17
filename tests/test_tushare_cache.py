@@ -103,3 +103,24 @@ def test_no_fallback_reraises_when_primary_fails(tmp_path: Path) -> None:
             client._api("daily")
     finally:
         tushare_mod.ts.pro_api = original
+
+
+def test_get_suspension_calls_suspend_d_and_caches(tmp_path: Path) -> None:
+    import zoo_index.data_sources.tushare as tushare_mod
+
+    class _SuspPro:
+        def suspend_d(self, **kwargs: object) -> pd.DataFrame:
+            return pd.DataFrame(
+                {"ts_code": ["000001.SZ"], "suspend_date": ["20240102"], "suspend_type": "S"}
+            )
+
+    original = tushare_mod.ts.pro_api
+    tushare_mod.ts.pro_api = lambda token="", timeout=30: _SuspPro()  # ty: ignore[invalid-assignment]
+    try:
+        client = TushareClient("token", cache_dir=tmp_path)
+        df = client.get_suspension("20240102")
+        assert not df.empty
+        assert df.iloc[0]["ts_code"] == "000001.SZ"
+        assert (tmp_path / "suspension" / "20240102.parquet").exists()
+    finally:
+        tushare_mod.ts.pro_api = original
