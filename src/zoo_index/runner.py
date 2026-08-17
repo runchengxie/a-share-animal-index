@@ -239,20 +239,20 @@ def _ensure_dirs(*paths: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def _snapshot_rules(rules_path: Path, data_dir: Path, start_date: str, end_date: str) -> Path:
+def _snapshot_rules(rules_path: Path, manifests_dir: Path, start_date: str, end_date: str) -> Path:
     timestamp = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")
-    snapshot_path = data_dir / f"rules_snapshot_{start_date}_{end_date}_{timestamp}.yml"
+    snapshot_path = manifests_dir / f"rules_snapshot_{start_date}_{end_date}_{timestamp}.yml"
     import shutil
 
-    _ensure_dirs(data_dir)
+    _ensure_dirs(manifests_dir)
     shutil.copy2(rules_path, snapshot_path)
     return snapshot_path
 
 
-def _find_previous_snapshot(data_dir: Path, prefix: str, date: str) -> Path | None:
+def _find_previous_snapshot(manifests_dir: Path, prefix: str, date: str) -> Path | None:
     candidates: list[tuple[str, Path]] = []
     prefix_value = f"{prefix}_"
-    for path in data_dir.glob(f"{prefix}_*.csv"):
+    for path in manifests_dir.glob(f"{prefix}_*.csv"):
         stem = path.stem
         if not stem.startswith(prefix_value):
             continue
@@ -394,32 +394,32 @@ def _write_public_outputs(
     result: DailyResult,
     benchmark_source: str,
 ) -> None:
-    docs_dir = output_dir
-    badges_dir = docs_dir / "badges"
+    data_dir = output_dir / "data"
+    badges_dir = data_dir / "badges"
     _ensure_dirs(badges_dir)
 
     generate_latest_json(
-        docs_dir / "latest.json",
+        data_dir / "latest.json",
         latest,
         result.benchmark_code,
         result.benchmark_label,
     )
-    generate_history_json(docs_dir / "history.json", nav_df, result.benchmark_label)
+    generate_history_json(data_dir / "history.json", nav_df, result.benchmark_label)
     generate_constituents_json(
-        docs_dir / "constituents.json",
+        data_dir / "constituents.json",
         result.date,
         result.strict_df,
         result.extended_df,
     )
     generate_metadata_json(
-        docs_dir / "metadata.json",
+        data_dir / "metadata.json",
         result.benchmark_code,
         result.benchmark_label,
         benchmark_source,
         result.date,
     )
     generate_badges(badges_dir, latest, result.benchmark_label)
-    generate_chart(docs_dir / "chart.png", nav_df, result.benchmark_label)
+    generate_chart(data_dir / "chart.png", nav_df, result.benchmark_label)
 
 
 def _write_changes_snapshot(
@@ -430,23 +430,27 @@ def _write_changes_snapshot(
     strict_holdings: pd.DataFrame,
     extended_holdings: pd.DataFrame,
 ) -> None:
-    constituents_path = output_dir / f"constituents_{date}.csv"
+    manifests_dir = output_dir / "manifests"
+    data_dir = output_dir / "data"
+    _ensure_dirs(manifests_dir, data_dir)
+
+    constituents_path = manifests_dir / f"constituents_{date}.csv"
     today_constituents = save_constituents(constituents_path, strict_df, extended_df)
 
-    holdings_path = output_dir / f"holdings_{date}.csv"
+    holdings_path = manifests_dir / f"holdings_{date}.csv"
     save_holdings(holdings_path, strict_holdings, extended_holdings)
 
-    previous_constituents_path = _find_previous_snapshot(output_dir, "constituents", date)
+    previous_constituents_path = _find_previous_snapshot(manifests_dir, "constituents", date)
     previous_constituents = (
         pd.read_csv(previous_constituents_path) if previous_constituents_path else pd.DataFrame()
     )
 
     changes = compute_changes(today_constituents, previous_constituents)
     suspected_noise = compute_suspected_noise(today_constituents)
-    changes_path = output_dir / f"changes_{date}.json"
+    changes_path = manifests_dir / f"changes_{date}.json"
     save_changes(changes_path, date, changes, suspected_noise)
 
-    generate_changes_json(output_dir / "changes.json", date, changes, suspected_noise)
+    generate_changes_json(data_dir / "changes.json", date, changes, suspected_noise)
 
 
 def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
@@ -474,7 +478,9 @@ def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
         print(f"{date} 非交易日，已跳过。")
         return 0
 
-    nav_path = config.output_dir / "nav.csv"
+    data_dir = config.output_dir / "data"
+    manifests_dir = config.output_dir / "manifests"
+    nav_path = data_dir / "nav.csv"
     existing_nav = load_nav(nav_path)
     if not existing_nav.empty:
         latest_date = max(existing_nav["date"])
@@ -495,7 +501,7 @@ def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
         print(f"计算指数失败（{date}）：{exc}")
         return 1
 
-    _ensure_dirs(config.output_dir)
+    _ensure_dirs(config.output_dir, data_dir, manifests_dir)
     nav_df, latest = update_nav(
         nav_path,
         result.date,
@@ -551,7 +557,7 @@ def _backfill_run_days(
         )
         if write_snapshots:
             save_holdings(
-                output_dir / f"holdings_{trade_date}.csv",
+                (output_dir / "manifests") / f"holdings_{trade_date}.csv",
                 result.strict_holdings,
                 result.extended_holdings,
             )
@@ -644,7 +650,10 @@ def run_backfill(config: RunConfig, client: TushareLike | None = None) -> int:
         return 1
 
     output_dir = config.output_dir
-    nav_path = output_dir / "nav.csv"
+    data_dir = output_dir / "data"
+    manifests_dir = output_dir / "manifests"
+    nav_path = data_dir / "nav.csv"
+    _ensure_dirs(data_dir, manifests_dir)
     existing_nav = load_nav(nav_path)
     existing_dates = set(existing_nav["date"]) if not existing_nav.empty else set()
     if config.backfill_mode == "missing":
@@ -656,7 +665,9 @@ def run_backfill(config: RunConfig, client: TushareLike | None = None) -> int:
         run_dates = open_dates
 
     if not config.no_rules_snapshot:
-        snapshot_path = _snapshot_rules(config.rules_path, output_dir, run_dates[0], run_dates[-1])
+        snapshot_path = _snapshot_rules(
+            config.rules_path, output_dir / "manifests", run_dates[0], run_dates[-1]
+        )
         print(f"回填规则快照已保存：{snapshot_path}")
 
     try:

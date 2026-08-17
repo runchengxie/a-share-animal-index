@@ -39,12 +39,12 @@ jobs:
       - name: Compute index
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-        run: uv run python -m zoo_index --output-dir .build/data --backfill
+        run: uv run python -m zoo_index --output-dir .build/artifacts --backfill
 
       - name: Prepare web data
         run: |
           mkdir -p web/public/data
-          cp .build/data/*.json web/public/data/
+          cp .build/artifacts/data/*.json web/public/data/
 
       - name: Build web
         working-directory: web

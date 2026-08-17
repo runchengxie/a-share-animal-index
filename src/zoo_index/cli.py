@@ -136,7 +136,7 @@ def build_run_config(args: argparse.Namespace, repo_root: Path) -> RunConfig | N
             print("回填天数必须大于 0。")
             return None
 
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else repo_root / "docs"
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else repo_root / "artifacts"
 
     return RunConfig(
         repo_root=repo_root,
