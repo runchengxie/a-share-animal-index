@@ -29,7 +29,7 @@ export default function ConstituentsTable({ variant, items }: Props) {
               <tr key={c.ts_code}>
                 <td>{c.ts_code}</td>
                 <td>{c.name}</td>
-                <td>{c.keyword || "—"}</td>
+                <td>{c.keyword || "无"}</td>
                 <td>{c.forced ? "强制" : "匹配"}</td>
               </tr>
             ))}
