@@ -10,6 +10,7 @@ from zoo_index.data_sources.tushare import TradeCalendarEntry
 from zoo_index.runner import (
     BenchmarkConfig,
     RunConfig,
+    _get_benchmark_return,
     _snapshot_rules,
     compute_day,
     run_backfill,
@@ -425,3 +426,23 @@ def test_backfill_carries_state_across_months(tmp_path: Path) -> None:
     # 二月首日快照含新成分海豚，证明状态正确重建并再平衡。
     holdings = pd.read_csv(tmp_path / "manifests" / "holdings_20240201.csv")
     assert "000009.SZ" in set(holdings["ts_code"])
+
+
+def test_benchmark_return_uses_adjusted_ratio_for_fund() -> None:
+    # 基准与指数同口径：fund 源用 close*adj/(pre_close*prev_adj)-1。
+    # 除息日 adj 跳升，单纯 close/pre_close 会漏掉分红。
+    class FundAdjClient:
+        def get_fund_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+            data = {"20240102": (10.0, 10.0), "20240103": (11.0, 10.0)}
+            close, pre = data[trade_date]
+            return pd.DataFrame([{"ts_code": ts_code, "close": close, "pre_close": pre}])
+
+        def get_fund_adj(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+            adj = {"20240102": 1.0, "20240103": 1.05}[trade_date]
+            return pd.DataFrame([{"ts_code": ts_code, "adj_factor": adj}])
+
+    client = FundAdjClient()
+    bench = BenchmarkConfig(code="510300.SH", source="fund", label="HS300 ETF")
+    # (11*1.05)/(10*1.0) - 1 = 0.155，而非 close/pre_close 给出的 0.10。
+    ret = _get_benchmark_return(client, "20240103", "20240102", bench)
+    assert ret == pytest.approx(0.155)

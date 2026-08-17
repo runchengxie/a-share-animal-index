@@ -184,6 +184,17 @@ def _compute_benchmark_daily_return(close: float, pre_close: float) -> float:
     return close / pre_close - 1
 
 
+def _adj_factor_value(df: pd.DataFrame | None, code: str) -> float:
+    """提取复权因子，缺失或非正时回退为 1.0（不影响收益口径）。"""
+    if df is None or df.empty or "adj_factor" not in df.columns:
+        return 1.0
+    row = df[df["ts_code"].astype(str) == str(code)]
+    if row.empty:
+        return 1.0
+    value = pd.to_numeric(row.iloc[0]["adj_factor"], errors="coerce")
+    return 1.0 if pd.isna(value) or value <= 0 else float(value)
+
+
 def _index_benchmark_return(client: TushareLike, trade_date: str, code: str) -> float:
     df = client.get_index_daily(trade_date, code)
     if df.empty:
@@ -191,22 +202,32 @@ def _index_benchmark_return(client: TushareLike, trade_date: str, code: str) -> 
     row = df.iloc[0]
     if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
+    # 指数 pre_close 为交易所复权价，直接用 close/pre_close。
     return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
 
 
-def _fund_benchmark_return(client: TushareLike, trade_date: str, code: str) -> float:
+def _fund_benchmark_return(
+    client: TushareLike, trade_date: str, prev_date: str, code: str
+) -> float:
     df = client.get_fund_daily(trade_date, code)
-    if df.empty:
+    prev_df = client.get_fund_daily(prev_date, code)
+    if df.empty or prev_df.empty:
         raise ValueError("基准行情为空")
     row = df.iloc[0]
     if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
-    return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
+    close = float(row["close"])
+    pre_close = float(row["pre_close"])
+    adj = _adj_factor_value(client.get_fund_adj(trade_date, code), code)
+    prev_adj = _adj_factor_value(client.get_fund_adj(prev_date, code), code)
+    # 基准与指数同口径：close*adj / (pre_close*prev_adj) - 1。
+    return close * adj / (pre_close * prev_adj) - 1
 
 
 def _stock_benchmark_return(
     client: TushareLike,
     trade_date: str,
+    prev_date: str,
     code: str,
     daily_prices: pd.DataFrame | None,
 ) -> float:
@@ -218,7 +239,11 @@ def _stock_benchmark_return(
     row = row_slice.iloc[0]
     if pd.isna(row["pre_close"]):
         raise ValueError("基准前收异常")
-    return _compute_benchmark_daily_return(float(row["close"]), float(row["pre_close"]))
+    close = float(row["close"])
+    pre_close = float(row["pre_close"])
+    adj = _adj_factor_value(client.get_adj_factor(trade_date), code)
+    prev_adj = _adj_factor_value(client.get_adj_factor(prev_date), code)
+    return close * adj / (pre_close * prev_adj) - 1
 
 
 def _get_benchmark_return(
@@ -233,9 +258,9 @@ def _get_benchmark_return(
     if source == "index":
         return _index_benchmark_return(client, trade_date, code)
     if source == "fund":
-        return _fund_benchmark_return(client, trade_date, code)
+        return _fund_benchmark_return(client, trade_date, prev_date, code)
     if source == "stock":
-        return _stock_benchmark_return(client, trade_date, code, daily_prices)
+        return _stock_benchmark_return(client, trade_date, prev_date, code, daily_prices)
     raise ValueError(f"unknown benchmark source: {source}")
 
 
