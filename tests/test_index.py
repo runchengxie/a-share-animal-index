@@ -61,9 +61,7 @@ def test_compute_equal_weight_return_excludes_genuine_missing() -> None:
         ]
     )
 
-    index_ret, _, stats = compute_equal_weight_return(
-        constituents, daily_prices, prev_daily_prices
-    )
+    index_ret, _, stats = compute_equal_weight_return(constituents, daily_prices, prev_daily_prices)
 
     assert index_ret == pytest.approx(0.10)
     assert stats.total_constituents == 2

@@ -134,9 +134,7 @@ def compute_equal_weight_return(
 
     merged = constituents.merge(daily_prices, on="ts_code", how="left")
     merged = merged.merge(
-        prev_daily_prices[["ts_code", "close"]].rename(
-            columns={"close": "prev_close_actual"}
-        ),
+        prev_daily_prices[["ts_code", "close"]].rename(columns={"close": "prev_close_actual"}),
         on="ts_code",
         how="left",
     )
