@@ -182,19 +182,21 @@ def test_run_daily_writes_benchmark_named_outputs(tmp_path: Path) -> None:
     )
     assert run_daily(config, client) == 0
 
-    nav = pd.read_csv(tmp_path / "nav.csv")
+    nav = pd.read_csv(tmp_path / "data" / "nav.csv")
     assert "benchmark_ret" in nav.columns
     assert "benchmark_nav" in nav.columns
     assert "hs300_ret" not in nav.columns
 
-    latest = __import__("json").loads((tmp_path / "latest.json").read_text(encoding="utf-8"))
+    latest = __import__("json").loads(
+        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
+    )
     assert latest["benchmark_nav"] == pytest.approx(1.01, rel=1e-6)
-    assert (tmp_path / "constituents.json").exists()
-    assert (tmp_path / "metadata.json").exists()
-    assert (tmp_path / "history.json").exists()
+    assert (tmp_path / "data" / "constituents.json").exists()
+    assert (tmp_path / "data" / "metadata.json").exists()
+    assert (tmp_path / "data" / "history.json").exists()
 
     # holdings 快照应写出持仓（含权重），而非成分。
-    holdings = pd.read_csv(tmp_path / "holdings_20240103.csv")
+    holdings = pd.read_csv(tmp_path / "manifests" / "holdings_20240103.csv")
     assert "weight" in holdings.columns
     # 同一文件含 strict 与 extended 两种组合，各自等权，权重分别合计为 1.0。
     for variant in ("strict", "extended"):
@@ -219,7 +221,7 @@ def test_run_backfill_then_missing_is_idempotent(tmp_path: Path) -> None:
         )
 
     assert run_backfill(_config(), client) == 0
-    nav = pd.read_csv(tmp_path / "nav.csv")
+    nav = pd.read_csv(tmp_path / "data" / "nav.csv")
     assert len(nav) == 4
     assert "benchmark_ret" in nav.columns
 
@@ -242,7 +244,7 @@ def test_run_backfill_all_mode_recomputes(tmp_path: Path) -> None:
         backfill_mode="all",
     )
     assert run_backfill(config, client) == 0
-    nav = pd.read_csv(tmp_path / "nav.csv")
+    nav = pd.read_csv(tmp_path / "data" / "nav.csv")
     assert len(nav) == 4
 
 

@@ -35,7 +35,7 @@ htmlcov/
 data/
 
 # 生成的网页与数据产物（由 daily.yml 部署到 Pages，不入库）
-docs/
+artifacts/
 web/dist/
 web/node_modules/
 web/public/data/
