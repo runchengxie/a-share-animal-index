@@ -1,25 +1,17 @@
-name: zoo-index-daily
+name: deploy-cloudflare
 
 on:
-  schedule:
-    - cron: "10 8 * * 1-5"
   workflow_dispatch:
+  # 如需与主分支推送联动，取消下面注释，并自备 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID。
+  # push:
+  #   branches: [main]
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: zoo-index-pages
-  cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,11 +44,9 @@ jobs:
           npm ci
           npm run build
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: web/dist
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy web/dist --project-name=a-share-animal-index

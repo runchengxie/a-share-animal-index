@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from .config import Rules
 
@@ -39,10 +39,7 @@ def _match_keyword(name: str, keywords: list[str]) -> str | None:
 
 
 def _hit_exclude_pattern(name: str, patterns: Iterable[str]) -> bool:
-    for pattern in patterns:
-        if pattern and pattern in name:
-            return True
-    return False
+    return any(pattern and pattern in name for pattern in patterns)
 
 
 class Matcher:
@@ -76,7 +73,3 @@ class Matcher:
             extended_keyword=extended_keyword,
             forced=False,
         )
-
-
-def classify_stock(ts_code: str, name: str, rules: Rules) -> MatchResult:
-    return Matcher(rules).classify(ts_code, name)

@@ -1,0 +1,41 @@
+import { Constituent } from "../api";
+
+interface Props {
+  variant: "strict" | "extended";
+  items: Constituent[];
+}
+
+export default function ConstituentsTable({ variant, items }: Props) {
+  const title = variant === "strict" ? "严格动物园成分" : "扩展动物园成分";
+  return (
+    <section className="constituents-table">
+      <h3>
+        {title}（{items.length}）
+      </h3>
+      {items.length === 0 ? (
+        <p className="muted">暂无成分。</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>代码</th>
+              <th>名称</th>
+              <th>匹配词</th>
+              <th>类型</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((c) => (
+              <tr key={c.ts_code}>
+                <td>{c.ts_code}</td>
+                <td>{c.name}</td>
+                <td>{c.keyword || "—"}</td>
+                <td>{c.forced ? "强制" : "匹配"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}

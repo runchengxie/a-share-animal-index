@@ -1,3 +1,3 @@
 """A-share animal index utilities."""
 
-__all__ = ["config", "matcher", "index", "outputs"]
+__all__ = ["config", "index", "matcher", "outputs"]

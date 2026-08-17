@@ -69,12 +69,6 @@ def _apply_namechange(df: pd.DataFrame, namechange: pd.DataFrame, as_of: str) ->
     return merged.drop(columns=["name_asof"])
 
 
-def prepare_universe(stock_basic: pd.DataFrame, rules: Rules) -> pd.DataFrame:
-    filtered = _filter_exchange(stock_basic, rules.allow_beijing)
-    filtered = _filter_st(filtered, rules.exclude_st)
-    return filtered
-
-
 def prepare_universe_asof(
     stock_basic: pd.DataFrame, namechange: pd.DataFrame, as_of: str, rules: Rules
 ) -> pd.DataFrame:
@@ -85,14 +79,16 @@ def prepare_universe_asof(
     return filtered
 
 
-def build_constituents(stock_basic: pd.DataFrame, rules: Rules) -> tuple[pd.DataFrame, pd.DataFrame]:
+def build_constituents(
+    stock_basic: pd.DataFrame, rules: Rules
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     matcher = Matcher(rules)
     strict_rows: list[dict] = []
     extended_rows: list[dict] = []
 
     for row in stock_basic.itertuples(index=False):
-        ts_code = row.ts_code
-        name = row.name
+        ts_code = row.ts_code  # ty: ignore[unresolved-attribute]
+        name = row.name  # ty: ignore[unresolved-attribute]
         if pd.isna(name):
             name = ""
         if not isinstance(name, str):
@@ -147,9 +143,12 @@ def compute_equal_weight_return(
         merged["prev_adj_factor"] = pd.to_numeric(merged["prev_adj_factor"], errors="coerce")
         merged.loc[merged["adj_factor"] <= 0, "adj_factor"] = pd.NA
         merged.loc[merged["prev_adj_factor"] <= 0, "prev_adj_factor"] = pd.NA
-        merged["ret"] = merged["close"] / merged["pre_close"] * (
-            merged["adj_factor"] / merged["prev_adj_factor"]
-        ) - 1
+        merged["ret"] = (
+            merged["close"]
+            / merged["pre_close"]
+            * (merged["adj_factor"] / merged["prev_adj_factor"])
+            - 1
+        )
     else:
         merged["ret"] = merged["close"] / merged["pre_close"] - 1
 

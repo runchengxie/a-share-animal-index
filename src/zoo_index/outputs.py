@@ -3,10 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from .index import IndexStats
+# 兼容旧字段名：历史 nav.csv 可能仍使用 hs300_ret / hs300_nav。
+_LEGACY_COLUMNS = {
+    "hs300_ret": "benchmark_ret",
+    "hs300_nav": "benchmark_nav",
+}
 
 
 def _variant_slice(df: pd.DataFrame, variant: str) -> pd.DataFrame:
@@ -18,7 +25,11 @@ def _variant_slice(df: pd.DataFrame, variant: str) -> pd.DataFrame:
 def load_nav(nav_path: Path) -> pd.DataFrame:
     if not nav_path.exists():
         return pd.DataFrame()
-    return pd.read_csv(nav_path, dtype={"date": str})
+    df = pd.read_csv(nav_path, dtype={"date": str})
+    for legacy, new in _LEGACY_COLUMNS.items():
+        if legacy in df.columns and new not in df.columns:
+            df = df.rename(columns={legacy: new})
+    return df
 
 
 def update_nav(
@@ -26,7 +37,7 @@ def update_nav(
     date: str,
     strict_ret: float,
     extended_ret: float,
-    hs300_ret: float,
+    benchmark_ret: float,
 ) -> tuple[pd.DataFrame, pd.Series]:
     nav_df = load_nav(nav_path)
     if not nav_df.empty:
@@ -35,22 +46,22 @@ def update_nav(
     if nav_df.empty:
         prev_strict = 1.0
         prev_extended = 1.0
-        prev_hs300 = 1.0
+        prev_benchmark = 1.0
     else:
         nav_df = nav_df.sort_values("date")
         last = nav_df.iloc[-1]
         prev_strict = float(last["zoo_strict_nav"])
         prev_extended = float(last["zoo_extended_nav"])
-        prev_hs300 = float(last["hs300_nav"])
+        prev_benchmark = float(last["benchmark_nav"])
 
     row = {
         "date": date,
         "zoo_strict_ret": strict_ret,
         "zoo_extended_ret": extended_ret,
-        "hs300_ret": hs300_ret,
+        "benchmark_ret": benchmark_ret,
         "zoo_strict_nav": prev_strict * (1 + strict_ret),
         "zoo_extended_nav": prev_extended * (1 + extended_ret),
-        "hs300_nav": prev_hs300 * (1 + hs300_ret),
+        "benchmark_nav": prev_benchmark * (1 + benchmark_ret),
     }
 
     nav_df = pd.concat([nav_df, pd.DataFrame([row])], ignore_index=True)
@@ -60,7 +71,9 @@ def update_nav(
     return nav_df, latest
 
 
-def save_holdings(path: Path, strict_holdings: pd.DataFrame, extended_holdings: pd.DataFrame) -> pd.DataFrame:
+def save_holdings(
+    path: Path, strict_holdings: pd.DataFrame, extended_holdings: pd.DataFrame
+) -> pd.DataFrame:
     strict = strict_holdings.copy()
     strict["variant"] = "strict"
     extended = extended_holdings.copy()
@@ -118,11 +131,7 @@ def compute_suspected_noise(constituents: pd.DataFrame) -> dict:
         if "forced" in slice_df.columns:
             mask &= ~slice_df["forced"].fillna(False).astype(bool)
         filtered = slice_df[mask]
-        return (
-            filtered[["ts_code", "name", "keyword"]]
-            .drop_duplicates()
-            .to_dict(orient="records")
-        )
+        return filtered[["ts_code", "name", "keyword"]].drop_duplicates().to_dict(orient="records")
 
     return {
         "strict": _variant_noise("strict"),
@@ -137,6 +146,12 @@ def save_changes(path: Path, date: str, changes: dict, suspected_noise: dict | N
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def generate_changes_json(
+    path: Path, date: str, changes: dict, suspected_noise: dict | None = None
+) -> None:
+    save_changes(path, date, changes, suspected_noise)
+
+
 def generate_latest_json(
     path: Path,
     latest: pd.Series,
@@ -147,18 +162,75 @@ def generate_latest_json(
         "date": latest["date"],
         "zoo_strict_nav": round(float(latest["zoo_strict_nav"]), 6),
         "zoo_extended_nav": round(float(latest["zoo_extended_nav"]), 6),
-        "hs300_nav": round(float(latest["hs300_nav"]), 6),
+        "benchmark_nav": round(float(latest["benchmark_nav"]), 6),
         "zoo_strict_daily": round(float(latest["zoo_strict_ret"]), 6),
         "zoo_extended_daily": round(float(latest["zoo_extended_ret"]), 6),
-        "hs300_daily": round(float(latest["hs300_ret"]), 6),
-        "zoo_strict_excess": round(
-            float(latest["zoo_strict_ret"] - latest["hs300_ret"]), 6
-        ),
+        "benchmark_daily": round(float(latest["benchmark_ret"]), 6),
+        "zoo_strict_excess": round(float(latest["zoo_strict_ret"] - latest["benchmark_ret"]), 6),
         "zoo_extended_excess": round(
-            float(latest["zoo_extended_ret"] - latest["hs300_ret"]), 6
+            float(latest["zoo_extended_ret"] - latest["benchmark_ret"]), 6
         ),
         "benchmark_code": benchmark_code,
         "benchmark_label": benchmark_label,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def generate_history_json(
+    path: Path, nav_df: pd.DataFrame, benchmark_label: str = "HS300 ETF"
+) -> None:
+    if nav_df.empty:
+        payload: list[dict] = []
+    else:
+        ordered = nav_df.sort_values("date")
+        payload = [
+            {
+                "date": row["date"],
+                "zoo_strict_ret": round(float(row["zoo_strict_ret"]), 8),
+                "zoo_extended_ret": round(float(row["zoo_extended_ret"]), 8),
+                "benchmark_ret": round(float(row["benchmark_ret"]), 8),
+                "zoo_strict_nav": round(float(row["zoo_strict_nav"]), 6),
+                "zoo_extended_nav": round(float(row["zoo_extended_nav"]), 6),
+                "benchmark_nav": round(float(row["benchmark_nav"]), 6),
+            }
+            for _, row in ordered.iterrows()
+        ]
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def generate_constituents_json(
+    path: Path, date: str, strict_df: pd.DataFrame, extended_df: pd.DataFrame
+) -> None:
+    def _to_records(df: pd.DataFrame) -> list[dict]:
+        if df.empty:
+            return []
+        cols = [c for c in ("ts_code", "name", "keyword", "forced") if c in df.columns]
+        return df[cols].to_dict(orient="records")
+
+    payload = {
+        "date": date,
+        "strict": _to_records(strict_df),
+        "extended": _to_records(extended_df),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def generate_metadata_json(
+    path: Path,
+    benchmark_code: str,
+    benchmark_label: str,
+    benchmark_source: str,
+    date: str,
+) -> None:
+    payload = {
+        "updated": date,
+        "benchmark": {
+            "code": benchmark_code,
+            "label": benchmark_label,
+            "source": benchmark_source,
+        },
+        "variants": ["strict", "extended"],
+        "rebalance": "monthly",
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -175,7 +247,7 @@ def generate_badges(
             f"{latest['zoo_extended_nav']:.4f}",
             "c05621",
         ),
-        ("hs300_nav", f"{benchmark_label} NAV", f"{latest['hs300_nav']:.4f}", "3182ce"),
+        ("benchmark_nav", f"{benchmark_label} NAV", f"{latest['benchmark_nav']:.4f}", "3182ce"),
     ]
     for name, label, message, color in items:
         payload = {
@@ -187,10 +259,19 @@ def generate_badges(
         path = badges_dir / f"{name}.json"
         path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
+    # 兼容期：保留旧名 hs300_nav.json，供既有 shields.io 链接过渡。
+    legacy = {
+        "schemaVersion": 1,
+        "label": f"{benchmark_label} NAV",
+        "message": f"{latest['benchmark_nav']:.4f}",
+        "color": "3182ce",
+    }
+    (badges_dir / "hs300_nav.json").write_text(
+        json.dumps(legacy, ensure_ascii=False), encoding="utf-8"
+    )
 
-def generate_chart(
-    path: Path, nav_df: pd.DataFrame, benchmark_label: str = "HS300 ETF"
-) -> None:
+
+def generate_chart(path: Path, nav_df: pd.DataFrame, benchmark_label: str = "HS300 ETF") -> None:
     if nav_df.empty:
         return
 
@@ -200,159 +281,19 @@ def generate_chart(
     import matplotlib.dates as mdates
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(dates, nav_df["zoo_strict_nav"], label="Zoo Strict", linewidth=1.6)
-    ax.plot(dates, nav_df["zoo_extended_nav"], label="Zoo Extended", linewidth=1.6)
-    ax.plot(dates, nav_df["hs300_nav"], label=benchmark_label, linewidth=1.6)
+    ax.plot(dates, nav_df["zoo_strict_nav"], label="严格动物园", linewidth=1.6)
+    ax.plot(dates, nav_df["zoo_extended_nav"], label="扩展动物园", linewidth=1.6)
+    ax.plot(dates, nav_df["benchmark_nav"], label=benchmark_label, linewidth=1.6)
 
     locator = mdates.AutoDateLocator(minticks=6, maxticks=10)
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
 
-    ax.set_xlabel("Date")
-    ax.set_ylabel("NAV")
-    ax.set_title("A-share Zoo Index")
+    ax.set_xlabel("日期")
+    ax.set_ylabel("净值")
+    ax.set_title("A股动物园指数")
     ax.legend()
     ax.grid(True, axis="y", linestyle="--", alpha=0.3)
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)
-
-
-def generate_index_html(
-    path: Path,
-    latest: pd.Series,
-    strict_stats: IndexStats,
-    extended_stats: IndexStats,
-    benchmark_label: str = "HS300 ETF",
-) -> None:
-    payload = {
-        "date": latest["date"],
-        "zoo_strict_nav": f"{latest['zoo_strict_nav']:.4f}",
-        "zoo_extended_nav": f"{latest['zoo_extended_nav']:.4f}",
-        "hs300_nav": f"{latest['hs300_nav']:.4f}",
-        "zoo_strict_daily": f"{latest['zoo_strict_ret']:.2%}",
-        "zoo_extended_daily": f"{latest['zoo_extended_ret']:.2%}",
-        "hs300_daily": f"{latest['hs300_ret']:.2%}",
-    }
-
-    html = f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>A股动物园指数</title>
-  <style>
-    :root {{
-      color-scheme: light;
-      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
-      --bg: #f6f5f1;
-      --card: #ffffff;
-      --text: #2b2b2b;
-      --muted: #666;
-      --accent: #1f6f54;
-    }}
-    body {{
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-    }}
-    header {{
-      padding: 32px 20px 12px;
-      text-align: center;
-    }}
-    h1 {{
-      margin: 0;
-      font-size: 28px;
-      letter-spacing: 1px;
-    }}
-    .subtitle {{
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 14px;
-    }}
-    main {{
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 12px 20px 40px;
-    }}
-    .cards {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }}
-    .card {{
-      background: var(--card);
-      border-radius: 12px;
-      padding: 16px;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.06);
-    }}
-    .card h3 {{
-      margin: 0 0 12px;
-      font-size: 16px;
-      color: var(--accent);
-    }}
-    .stat {{
-      font-size: 22px;
-      font-weight: 600;
-      margin-bottom: 6px;
-    }}
-    .stat small {{
-      font-size: 12px;
-      color: var(--muted);
-    }}
-    .chart {{
-      background: var(--card);
-      border-radius: 12px;
-      padding: 16px;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.06);
-    }}
-    .chart img {{
-      width: 100%;
-      border-radius: 8px;
-    }}
-    .notes {{
-      margin-top: 16px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>A股动物园指数</h1>
-    <div class="subtitle">最近更新：{payload['date']}</div>
-  </header>
-  <main>
-    <section class="cards">
-      <div class="card">
-        <h3>严格动物园</h3>
-        <div class="stat">{payload['zoo_strict_nav']}</div>
-        <div class="stat"><small>今日涨跌</small> {payload['zoo_strict_daily']}</div>
-        <div class="stat"><small>成分股</small> {strict_stats.priced_constituents}/{strict_stats.total_constituents}</div>
-      </div>
-      <div class="card">
-        <h3>扩展动物园</h3>
-        <div class="stat">{payload['zoo_extended_nav']}</div>
-        <div class="stat"><small>今日涨跌</small> {payload['zoo_extended_daily']}</div>
-        <div class="stat"><small>成分股</small> {extended_stats.priced_constituents}/{extended_stats.total_constituents}</div>
-      </div>
-      <div class="card">
-        <h3>{benchmark_label}</h3>
-        <div class="stat">{payload['hs300_nav']}</div>
-        <div class="stat"><small>今日涨跌</small> {payload['hs300_daily']}</div>
-      </div>
-    </section>
-    <section class="chart">
-      <img src="chart.png" alt="动物园指数曲线" />
-    </section>
-    <section class="notes">
-      <p>说明：严格动物园仅收录明确动物词汇，扩展动物园包含单字动物/神兽词，噪声更高但更热闹。</p>
-      <p>净值使用复权因子还原分红送转影响，基准同步复权。</p>
-    </section>
-  </main>
-</body>
-</html>
-"""
-    path.write_text(html, encoding="utf-8")

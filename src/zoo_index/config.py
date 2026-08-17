@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import re
+import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-import re
-from typing import Iterable
-import warnings
 
 import yaml
 
@@ -20,7 +20,7 @@ class Rules:
     allow_beijing: bool
 
 
-_TS_CODE_RE = re.compile(r"^\\d{6}\\.(SZ|SH|BJ)$", re.IGNORECASE)
+_TS_CODE_RE = re.compile(r"^\d{6}\.(SZ|SH|BJ)$", re.IGNORECASE)
 
 
 def _as_list(value: object) -> list[str]:

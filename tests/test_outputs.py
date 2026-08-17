@@ -82,7 +82,7 @@ def test_generate_badges_writes_schema(tmp_path) -> None:
         {
             "zoo_strict_nav": 1.23456,
             "zoo_extended_nav": 0.98765,
-            "hs300_nav": 1.11111,
+            "benchmark_nav": 1.11111,
         }
     )
 

@@ -1,45 +1,47 @@
-.PHONY: help install dev daily backfill backfill-years backfill-all chart test lint
+.PHONY: help install dev daily backfill backfill-years backfill-all chart test lint format
 
-CLI ?= zoo-index
-CHART ?= zoo-chart
+CLI ?= uv run zoo-index
+CHART ?= uv run zoo-chart
 DATE ?=
 BACKFILL_YEARS ?= 5
+OUTPUT_DIR ?= .build/data
 
 help:
 	@echo "Targets:"
-	@echo "  make install         Install package"
-	@echo "  make dev             Install dev deps"
+	@echo "  make install         Install deps via uv"
+	@echo "  make dev             Install deps via uv"
 	@echo "  make daily           Run daily update (DATE=YYYYMMDD optional)"
 	@echo "  make backfill        Backfill default window"
 	@echo "  make backfill-years  Backfill BACKFILL_YEARS (default 5)"
 	@echo "  make backfill-all    Backfill and recompute all"
 	@echo "  make chart           Redraw chart from nav.csv"
 	@echo "  make test            Run pytest"
-	@echo "  make lint            Run ruff"
+	@echo "  make lint            Run ruff check"
+	@echo "  make format          Run ruff format"
 
-install:
-	pip install .
-
-dev:
-	pip install -e ".[dev]"
+install dev:
+	uv sync
 
 daily:
-	$(CLI) $(if $(DATE),--date $(DATE),)
+	$(CLI) --output-dir $(OUTPUT_DIR) $(if $(DATE),--date $(DATE),)
 
 backfill:
-	$(CLI) --backfill
+	$(CLI) --output-dir $(OUTPUT_DIR) --backfill
 
 backfill-years:
-	$(CLI) --backfill-years $(BACKFILL_YEARS)
+	$(CLI) --output-dir $(OUTPUT_DIR) --backfill-years $(BACKFILL_YEARS)
 
 backfill-all:
-	$(CLI) --backfill --backfill-mode all
+	$(CLI) --output-dir $(OUTPUT_DIR) --backfill --backfill-mode all
 
 chart:
 	$(CHART)
 
 test:
-	pytest
+	uv run pytest
 
 lint:
-	ruff check .
+	uv run ruff check .
+
+format:
+	uv run ruff format .
