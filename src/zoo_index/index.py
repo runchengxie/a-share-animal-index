@@ -122,13 +122,25 @@ def build_constituents(
 def compute_equal_weight_return(
     constituents: pd.DataFrame,
     daily_prices: pd.DataFrame,
+    prev_daily_prices: pd.DataFrame,
     adj_factors: pd.DataFrame | None = None,
     prev_adj_factors: pd.DataFrame | None = None,
+    suspended: set[str] | None = None,
 ) -> tuple[float, pd.DataFrame, IndexStats]:
     if constituents.empty:
         return 0.0, constituents, IndexStats(0, 0, 0)
 
+    suspended = suspended or set()
+
     merged = constituents.merge(daily_prices, on="ts_code", how="left")
+    merged = merged.merge(
+        prev_daily_prices[["ts_code", "close"]].rename(
+            columns={"close": "prev_close_actual"}
+        ),
+        on="ts_code",
+        how="left",
+    )
+
     if adj_factors is not None and prev_adj_factors is not None:
         merged = merged.merge(
             adj_factors[["ts_code", "adj_factor"]],
@@ -145,15 +157,30 @@ def compute_equal_weight_return(
         merged.loc[merged["prev_adj_factor"] <= 0, "prev_adj_factor"] = pd.NA
         merged["ret"] = (
             merged["close"]
-            / merged["pre_close"]
-            * (merged["adj_factor"] / merged["prev_adj_factor"])
+            * merged["adj_factor"]
+            / (merged["prev_close_actual"] * merged["prev_adj_factor"])
             - 1
         )
     else:
-        merged["ret"] = merged["close"] / merged["pre_close"] - 1
+        merged["ret"] = merged["close"] / merged["prev_close_actual"] - 1
 
-    valid = merged.dropna(subset=["ret", "close", "pre_close"]).copy()
-    valid = valid[valid["pre_close"] > 0]
+    no_price = merged["close"].isna()
+    suspended_mask = no_price & merged["ts_code"].isin(suspended)
+    if suspended_mask.any():
+        # 停牌：无当日行情，但持仓与权重保留，当日收益计为 0。
+        merged.loc[suspended_mask, "ret"] = 0.0
+        merged.loc[suspended_mask, "close"] = merged.loc[suspended_mask, "prev_close_actual"]
+        merged.loc[suspended_mask, "pre_close"] = merged.loc[suspended_mask, "prev_close_actual"]
+
+    # 真实缺失：无行情且非停牌，warning 后排除，不静默当成停牌。
+    genuine_missing = no_price & ~merged["ts_code"].isin(suspended)
+    if genuine_missing.any():
+        codes = merged.loc[genuine_missing, "ts_code"].tolist()
+        print(f"警告：以下成分无行情且非停牌，已排除出当日指数：{codes}")
+
+    valid = merged[~genuine_missing].copy()
+    valid = valid.dropna(subset=["ret"])
+    valid = valid[valid["prev_close_actual"] > 0]
 
     total = len(merged)
     priced = len(valid)

@@ -24,10 +24,12 @@ class FakeClient:
         self.open_dates = open_dates
         self.prices = prices
         self.benchmark_code = "000300.SH"
+        self.prev_date = "20240102"
 
-    def _price_row(self, ts_code: str) -> dict:
+    def _price_row(self, ts_code: str, as_prev: bool = False) -> dict:
         close, pre_close = self.prices.get(ts_code, (1.0, 1.0))
-        return {"ts_code": ts_code, "close": close, "pre_close": pre_close}
+        effective_close = pre_close if as_prev else close
+        return {"ts_code": ts_code, "close": effective_close, "pre_close": pre_close}
 
     def get_trade_calendar(self, date: str) -> TradeCalendarEntry:
         return TradeCalendarEntry(date=date, is_open=date in self.open_dates)
@@ -93,7 +95,8 @@ class FakeClient:
         return pd.DataFrame(columns=["ts_code", "name", "start_date", "end_date"])  # ty: ignore[invalid-argument-type]
 
     def get_daily(self, trade_date: str) -> pd.DataFrame:
-        return pd.DataFrame([self._price_row(code) for code in self.prices])
+        as_prev = trade_date == self.prev_date
+        return pd.DataFrame([self._price_row(code, as_prev) for code in self.prices])
 
     def get_adj_factor(self, trade_date: str) -> pd.DataFrame:
         return pd.DataFrame([{"ts_code": code, "adj_factor": 1.0} for code in self.prices])
@@ -106,6 +109,9 @@ class FakeClient:
 
     def get_fund_adj(self, trade_date: str, ts_code: str) -> pd.DataFrame:
         return pd.DataFrame([{"ts_code": ts_code, "adj_factor": 1.0}])
+
+    def get_suspension(self, trade_date: str) -> pd.DataFrame:
+        return pd.DataFrame(columns=pd.Index(["ts_code", "suspend_date", "suspend_type"]))
 
 
 def _rules() -> Rules:
@@ -186,6 +192,14 @@ def test_run_daily_writes_benchmark_named_outputs(tmp_path: Path) -> None:
     assert (tmp_path / "constituents.json").exists()
     assert (tmp_path / "metadata.json").exists()
     assert (tmp_path / "history.json").exists()
+
+    # holdings 快照应写出持仓（含权重），而非成分。
+    holdings = pd.read_csv(tmp_path / "holdings_20240103.csv")
+    assert "weight" in holdings.columns
+    # 同一文件含 strict 与 extended 两种组合，各自等权，权重分别合计为 1.0。
+    for variant in ("strict", "extended"):
+        variant_weights = holdings.loc[holdings["variant"] == variant, "weight"]
+        assert variant_weights.sum() == pytest.approx(1.0)
 
 
 def test_run_backfill_then_missing_is_idempotent(tmp_path: Path) -> None:
