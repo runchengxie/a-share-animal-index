@@ -21,7 +21,7 @@ def _benchmark(source: str = "index"):
 
 
 def _empty_namechange() -> pd.DataFrame:
-    return pd.DataFrame(columns=["ts_code", "name", "start_date", "end_date"])
+    return pd.DataFrame(columns=pd.Index(["ts_code", "name", "start_date", "end_date"]))
 
 
 def test_anomalous_codes_detects_delist() -> None:
@@ -183,4 +183,5 @@ def test_compute_day_exception_rebalance_on_delist() -> None:
     assert set(day2.strict_holdings["ts_code"]) == {"000001.SZ"}
     assert day2.strict_holdings["weight"].iloc[0] == pytest.approx(1.0)
     assert day2.strict_ret == pytest.approx(0.10)
+    assert day2.state is not None
     assert day2.state.strict.reason == "exception"

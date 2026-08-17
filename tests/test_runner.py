@@ -441,6 +441,15 @@ def test_benchmark_return_uses_adjusted_ratio_for_fund() -> None:
             adj = {"20240102": 1.0, "20240103": 1.05}[trade_date]
             return pd.DataFrame([{"ts_code": ts_code, "adj_factor": adj}])
 
+        def get_adj_factor(self, trade_date: str) -> pd.DataFrame:
+            return pd.DataFrame(columns=pd.Index(["ts_code", "adj_factor"]))
+
+        def get_index_daily(self, trade_date: str, ts_code: str) -> pd.DataFrame:
+            return pd.DataFrame([{"ts_code": ts_code, "close": 1.0, "pre_close": 1.0}])
+
+        def get_daily(self, trade_date: str) -> pd.DataFrame:
+            return pd.DataFrame(columns=pd.Index(["ts_code", "close", "pre_close"]))
+
     client = FundAdjClient()
     bench = BenchmarkConfig(code="510300.SH", source="fund", label="HS300 ETF")
     # (11*1.05)/(10*1.0) - 1 = 0.155，而非 close/pre_close 给出的 0.10。

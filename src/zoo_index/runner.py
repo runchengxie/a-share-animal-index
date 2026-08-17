@@ -9,7 +9,12 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from zoo_index.config import load_rules, load_rules_asof
-from zoo_index.data_sources.tushare import TushareClient, TushareLike
+from zoo_index.data_sources.tushare import (
+    BenchmarkSourceLike,
+    DailySourceLike,
+    TushareClient,
+    TushareLike,
+)
 from zoo_index.index import (
     IndexStats,
     PortfolioState,
@@ -195,7 +200,7 @@ def _adj_factor_value(df: pd.DataFrame | None, code: str) -> float:
     return 1.0 if pd.isna(value) or value <= 0 else float(value)
 
 
-def _index_benchmark_return(client: TushareLike, trade_date: str, code: str) -> float:
+def _index_benchmark_return(client: BenchmarkSourceLike, trade_date: str, code: str) -> float:
     df = client.get_index_daily(trade_date, code)
     if df.empty:
         raise ValueError("基准行情为空")
@@ -207,7 +212,7 @@ def _index_benchmark_return(client: TushareLike, trade_date: str, code: str) -> 
 
 
 def _fund_benchmark_return(
-    client: TushareLike, trade_date: str, prev_date: str, code: str
+    client: BenchmarkSourceLike, trade_date: str, prev_date: str, code: str
 ) -> float:
     df = client.get_fund_daily(trade_date, code)
     prev_df = client.get_fund_daily(prev_date, code)
@@ -225,7 +230,7 @@ def _fund_benchmark_return(
 
 
 def _stock_benchmark_return(
-    client: TushareLike,
+    client: BenchmarkSourceLike,
     trade_date: str,
     prev_date: str,
     code: str,
@@ -247,7 +252,7 @@ def _stock_benchmark_return(
 
 
 def _get_benchmark_return(
-    client: TushareLike,
+    client: BenchmarkSourceLike,
     trade_date: str,
     prev_date: str,
     benchmark: BenchmarkConfig,
@@ -401,11 +406,11 @@ def _month_first_open_date(client: TushareLike, date: str, cache: dict[str, str]
     return first_date
 
 
-def _amounts_asof(client: TushareLike, trade_date: str) -> pd.DataFrame:
+def _amounts_asof(client: DailySourceLike, trade_date: str) -> pd.DataFrame:
     """取再平衡日成交额，用于流动性过滤；无 amount 列时返回空表。"""
     daily = client.get_daily(trade_date)
     if daily.empty or "amount" not in daily.columns:
-        return pd.DataFrame(columns=["ts_code", "amount"])
+        return pd.DataFrame(columns=pd.Index(["ts_code", "amount"]))
     return daily[["ts_code", "amount"]].copy()
 
 
@@ -428,7 +433,7 @@ def _get_constituents_for_rebalance(
     rules,
     rebalance_date: str,
     rules_path: Path | None = None,
-    client: TushareLike | None = None,
+    client: DailySourceLike | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if rebalance_date in cache:
         return cache[rebalance_date]

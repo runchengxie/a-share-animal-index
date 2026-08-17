@@ -65,6 +65,9 @@ def test_rebalance_excludes_low_amount() -> None:
                 ]
             )
 
+        def get_adj_factor(self, trade_date: str) -> pd.DataFrame:
+            return pd.DataFrame(columns=pd.Index(["ts_code", "adj_factor"]))
+
     stock_basic = pd.DataFrame(
         [
             {
@@ -83,7 +86,7 @@ def test_rebalance_excludes_low_amount() -> None:
             },
         ]
     )
-    namechange = pd.DataFrame(columns=["ts_code", "name", "start_date", "end_date"])
+    namechange = pd.DataFrame(columns=pd.Index(["ts_code", "name", "start_date", "end_date"]))
     rules = _rules_with(min_daily_amount=5e8)
 
     strict_df, extended_df = _get_constituents_for_rebalance(
@@ -104,6 +107,9 @@ def test_rebalance_keeps_all_when_amount_missing() -> None:
                 ]
             )
 
+        def get_adj_factor(self, trade_date: str) -> pd.DataFrame:
+            return pd.DataFrame(columns=pd.Index(["ts_code", "adj_factor"]))
+
     stock_basic = pd.DataFrame(
         [
             {
@@ -122,7 +128,7 @@ def test_rebalance_keeps_all_when_amount_missing() -> None:
             },
         ]
     )
-    namechange = pd.DataFrame(columns=["ts_code", "name", "start_date", "end_date"])
+    namechange = pd.DataFrame(columns=pd.Index(["ts_code", "name", "start_date", "end_date"]))
     rules = _rules_with(min_daily_amount=5e8)
 
     strict_df, _ = _get_constituents_for_rebalance(
