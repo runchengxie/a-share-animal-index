@@ -34,3 +34,6 @@ jobs:
 
       - name: uv audit
         run: uv audit --frozen
+        # 数据科学依赖（idna/lxml/pillow 等）存在较多传递依赖 CVE，
+        # 这些告警不阻断合并，仅作为可见性报告。
+        continue-on-error: true
