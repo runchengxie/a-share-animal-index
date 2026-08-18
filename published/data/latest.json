@@ -1,0 +1,13 @@
+{
+  "date": "20260817",
+  "zoo_strict_nav": 1.245698,
+  "zoo_extended_nav": 1.588539,
+  "benchmark_nav": 1.169484,
+  "zoo_strict_daily": 0.018854,
+  "zoo_extended_daily": 0.018923,
+  "benchmark_daily": 0.01587,
+  "zoo_strict_excess": 0.002985,
+  "zoo_extended_excess": 0.003053,
+  "benchmark_code": "510300.SH",
+  "benchmark_label": "HS300 ETF"
+}
