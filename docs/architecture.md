@@ -4,7 +4,7 @@
 
 ## 目录结构
 
-本地运行默认输出到 `artifacts/`，分两类目录（可用 `--output-dir` 修改）：
+本地运行默认输出到 `artifacts/`（CLI 缺省）。**本仓库统一改用 `published/`（`--output-dir published`），且 `published/` 已 git 追踪入库**（供增量回填复用），结构相同，分两类目录：
 
 - `artifacts/data/`：对外公开的数据与图表，供网页读取
   - `nav.csv`：净值与每日收益（也是下次运行的输入，作为历史净值源）
@@ -26,10 +26,21 @@
 ## 数据流
 
 1. `uv run python -m zoo_index` 读取 `rules.yml` 与 `data/cache/` 中的原始行情，计算指数。
-2. 结果写入 `artifacts/data/` 与 `artifacts/manifests/`。
-3. `daily.yml` 在 CI 中把 `artifacts/data/*.json` 复制到 `web/public/data/`，再构建网页。
+2. 结果写入 `published/data/`（对外公开 JSON 与 `nav.csv`）与 `published/manifests/`（组合状态快照，供增量回填恢复上一交易日组合）。
+3. 网页构建时由 `web/scripts/copy-published-data.mjs` 从 `published/data/` 直接取数到 `web/public/data/`（单一数据源，不再经由 CI 的 cp 步骤）。
 4. 网页（Vite + React + ECharts）只读取 `web/public/data/` 下的公开 JSON，不接触 Tushare Token，也不在浏览器中计算指数。
 5. 构建产物 `web/dist` 通过 `actions/deploy-pages` 部署到 GitHub Pages。
+
+## 数据持久化与增量回填
+
+`published/` 目录已 git 追踪入库，是每日指数的唯一真相源：
+
+- `published/data/`：网页消费的 JSON（`latest.json`、`history.json`、`constituents.json`、`changes.json`、`metadata.json` 等）与 `nav.csv`（历史净值，也是下次运行的输入）。
+- `published/manifests/`：每日组合状态快照（`holdings_YYYYMMDD.csv`、`constituents_YYYYMMDD.csv`、`changes_YYYYMMDD.json`），供增量回填时重建 `PortfolioState`，保证无前视、可复现。
+
+`runner.py` 的 `missing` 模式（默认）读取已追踪的 `nav.csv` 与 `manifests/`，只对尚未计算的交易日补算；本地拉取 Tushare 也只需当天数据。**因此数据入库后，后续每日运行极快**（分钟级），无需每次全量重算。
+
+`data/cache/` 仍是 Tushare 原始行情缓存，默认不入库（见 `.gitignore` 的 `/data/`），仅本地加速用。
 
 ## 计算模型
 
@@ -87,20 +98,41 @@ Makefile 快捷命令：`make daily` / `make backfill` / `make chart` / `make te
 
 ## 部署
 
-### GitHub Pages（默认）
+### 本地运行计算（推荐）
 
-`.github/workflows/daily.yml` 在交易日收盘后自动运行（cron 使用 UTC，示例为北京时间 16:10）：
+指数计算改在本机（或计划任务）完成，再 push `published/`，GitHub Actions 只负责部署，不再消耗 CI 配额、也不再因海外 runner 拉 Tushare 慢而不稳。
 
-1. 用 uv 计算指数，写出 `web/public/data/*.json`
-2. 用 npm 构建网页到 `web/dist`
+前置：在仓库根目录 `.env` 设置 `TUSHARE_TOKEN`（备用 `TUSHARE_TOKEN_2` + `TUSHARE_API_URL` 见「数据源与 Token」）。
+
+```bash
+# 增量更新（缺失的交易日自动补算；首跑或换口径用 --backfill-mode all）
+uv run python -m zoo_index --output-dir published --backfill
+
+# 把新数据入库
+git add published
+git commit -m "chore: 每日数据更新 [skip ci]"
+git push
+```
+
+可挂系统计划任务（cron / Windows 任务计划程序）在交易日收盘后自动跑，保持 `published/` 每日新鲜。
+
+### GitHub Pages（只部署）
+
+`.github/workflows/daily.yml` 只做构建与部署（cron 使用 UTC，示例为北京时间 16:10 触发），不再计算指数：
+
+1. `actions/checkout` 取出已追踪的 `published/`
+2. `npm ci` + `npm run build`：`web/scripts/copy-published-data.mjs` 先把 `published/data/*.json` 取到 `web/public/data/`，再 `vite build` 产出 `web/dist`
 3. 通过 `actions/deploy-pages` 部署到 GitHub Pages
 
-使用前需两步：
+使用前只需一步：在仓库 Settings 的 Pages 设置里，把来源改为 GitHub Actions。无需在 Secrets 配置 `TUSHARE_TOKEN`（计算已不在 CI 内）。
 
-1. 在仓库 Secrets 里添加 `TUSHARE_TOKEN`
-2. 在仓库 Settings 的 Pages 设置里，把来源改为 GitHub Actions
+单点说明：若本机未按时 push `published/`，Actions 部署的是旧数据（网页停滞但不报错）。务必保持本机计划任务运行。
 
-main 分支不再提交任何生成物，产物走 Pages 构建，降低提交噪音。
+### 为什么不把数据放进 web/ 或 src/
+
+- `manifests/` 是 runner 内部状态快照，网页不消费；放进 `web/` 只会污染前端目录、被误带入构建。
+- `src/` 是 Python 包的约定位置（`src/zoo_index/`），`web/` 是 TS 前端，二者边界应清晰，混放破坏项目结构。
+- 因此数据统一留在仓库根的 `published/`（根级追踪），网页在构建期单向取数，单一真相源。
 
 ### Cloudflare Pages（替代）
 
