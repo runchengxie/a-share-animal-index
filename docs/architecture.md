@@ -98,9 +98,11 @@ Makefile 快捷命令：`make daily` / `make backfill` / `make chart` / `make te
 
 ## 部署
 
-### 本地运行计算（推荐）
+### 模式：本机优先，Actions 兜底
 
-指数计算改在本机（或计划任务）完成，再 push `published/`，GitHub Actions 只负责部署，不再消耗 CI 配额、也不再因海外 runner 拉 Tushare 慢而不稳。
+指数计算优先在本机（或计划任务）完成并 push `published/`；若某天本机没跑，`daily.yml` 会用 runner 的 `missing` 增量模式自动补算缺失的交易日并 push，再构建部署。两层都基于同一份已追踪的 `published/`，互不冲突。
+
+### 本地运行计算（推荐，优先）
 
 前置：在仓库根目录 `.env` 设置 `TUSHARE_TOKEN`（备用 `TUSHARE_TOKEN_2` + `TUSHARE_API_URL` 见「数据源与 Token」）。
 
@@ -114,19 +116,21 @@ git commit -m "chore: 每日数据更新 [skip ci]"
 git push
 ```
 
-可挂系统计划任务（cron / Windows 任务计划程序）在交易日收盘后自动跑，保持 `published/` 每日新鲜。
+可挂系统计划任务（cron / Windows 任务计划程序）在交易日收盘后自动跑，保持 `published/` 每日新鲜，减少 CI 配额占用与海外网络依赖。
 
-### GitHub Pages（只部署）
+### GitHub Pages（构建部署 + 兜底计算）
 
-`.github/workflows/daily.yml` 只做构建与部署（cron 使用 UTC，示例为北京时间 16:10 触发），不再计算指数：
+`.github/workflows/daily.yml`（cron 使用 UTC，示例为北京时间 16:10 触发）流程：
 
 1. `actions/checkout` 取出已追踪的 `published/`
-2. `npm ci` + `npm run build`：`web/scripts/copy-published-data.mjs` 先把 `published/data/*.json` 取到 `web/public/data/`，再 `vite build` 产出 `web/dist`
-3. 通过 `actions/deploy-pages` 部署到 GitHub Pages
+2. `uv run python -m zoo_index --output-dir published --backfill`：以 `missing` 模式只补缺失的交易日（本机已 push 则跳过，无事可做）；用 `secrets.TUSHARE_TOKEN` 拉取
+3. 若有新增，bot 身份 `git commit` + `git push` 回 `published/`
+4. `npm ci` + `npm run build`：`web/scripts/copy-published-data.mjs` 先把 `published/data/*.json` 取到 `web/public/data/`，再 `vite build` 产出 `web/dist`
+5. 通过 `actions/deploy-pages` 部署到 GitHub Pages
 
-使用前只需一步：在仓库 Settings 的 Pages 设置里，把来源改为 GitHub Actions。无需在 Secrets 配置 `TUSHARE_TOKEN`（计算已不在 CI 内）。
+使用前需两步：在仓库 Settings 的 Pages 设置里把来源改为 GitHub Actions；在仓库 Secrets 添加 `TUSHARE_TOKEN`（兜底计算需要）。
 
-单点说明：若本机未按时 push `published/`，Actions 部署的是旧数据（网页停滞但不报错）。务必保持本机计划任务运行。
+单点说明：本机优先能省 CI 配额与海外网络开销；即使本机完全不管，Actions 也会自动兜底补算，网页不会长期停滞。但若长期依赖兜底，每日部署会变慢（海外 runner 拉 Tushare），且消耗 CI 配额。
 
 ### 为什么不把数据放进 web/ 或 src/
 
