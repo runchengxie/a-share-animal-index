@@ -31,10 +31,12 @@ htmlcov/
 .idea/
 .vscode/
 
-# 本地数据产物（每日任务生成，不入库）
-data/
+# 本地数据产物（每日任务生成的 tushare 缓存，不入库）
+# 注意：仅忽略仓库根目录的 data/（即 data/cache），不能用 "data/" 这种目录模式，
+# 否则会误伤 published/data/（每日指数数据由 daily.yml 提交入库追踪，供增量回填复用）
+/data/
 
-# published/ 例外：每日计算的指数数据由 daily.yml 提交入库追踪，供增量回填复用
+# published/：每日计算的指数数据由 daily.yml 提交入库追踪，供增量回填复用
 # （其余网页/构建产物仍不入库，见下）
 
 # 生成的网页与数据产物（由 daily.yml 部署到 Pages，不入库）
