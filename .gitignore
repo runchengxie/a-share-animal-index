@@ -34,6 +34,9 @@ htmlcov/
 # 本地数据产物（每日任务生成，不入库）
 data/
 
+# published/ 例外：每日计算的指数数据由 daily.yml 提交入库追踪，供增量回填复用
+# （其余网页/构建产物仍不入库，见下）
+
 # 生成的网页与数据产物（由 daily.yml 部署到 Pages，不入库）
 artifacts/
 web/dist/
