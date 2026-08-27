@@ -1,13 +1,13 @@
 {
-  "date": "20260826",
-  "zoo_strict_nav": 1.256131,
-  "zoo_extended_nav": 1.560978,
-  "benchmark_nav": 1.133189,
-  "zoo_strict_daily": 0.007369,
-  "zoo_extended_daily": 0.004039,
-  "benchmark_daily": 0.007799,
-  "zoo_strict_excess": -0.00043,
-  "zoo_extended_excess": -0.00376,
+  "date": "20260827",
+  "zoo_strict_nav": 1.288876,
+  "zoo_extended_nav": 1.581922,
+  "benchmark_nav": 1.142689,
+  "zoo_strict_daily": 0.026069,
+  "zoo_extended_daily": 0.013417,
+  "benchmark_daily": 0.008383,
+  "zoo_strict_excess": 0.017685,
+  "zoo_extended_excess": 0.005034,
   "benchmark_code": "510300.SH",
   "benchmark_label": "HS300 ETF"
 }

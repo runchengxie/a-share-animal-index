@@ -10960,5 +10960,14 @@
     "zoo_strict_nav": 1.256131,
     "zoo_extended_nav": 1.560978,
     "benchmark_nav": 1.133189
+  },
+  {
+    "date": "20260827",
+    "zoo_strict_ret": 0.02606852,
+    "zoo_extended_ret": 0.01341723,
+    "benchmark_ret": 0.00838349,
+    "zoo_strict_nav": 1.288876,
+    "zoo_extended_nav": 1.581922,
+    "benchmark_nav": 1.142689
   }
 ]
