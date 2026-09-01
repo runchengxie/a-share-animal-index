@@ -1,5 +1,5 @@
 {
-  "date": "20260831",
+  "date": "20260901",
   "strict": [
     {
       "ts_code": "000572.SZ",
@@ -1021,6 +1021,12 @@
       "ts_code": "001257.SZ",
       "name": "盛龙股份",
       "keyword": "龙",
+      "forced": false
+    },
+    {
+      "ts_code": "601123.SH",
+      "name": "马矿股份",
+      "keyword": "马",
       "forced": false
     }
   ]
