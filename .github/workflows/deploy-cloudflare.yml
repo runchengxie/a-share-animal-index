@@ -14,28 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install Python deps
-        run: uv sync --frozen
-
-      - name: Compute index
-        env:
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-        run: uv run python -m zoo_index --output-dir .build/data --backfill
-
-      - name: Prepare web data
+      - name: Prepare published data
         run: |
           mkdir -p web/public/data
-          cp .build/data/*.json web/public/data/
+          cp published/data/*.json web/public/data/
 
       - name: Build web
         working-directory: web
