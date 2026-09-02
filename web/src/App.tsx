@@ -1,27 +1,39 @@
-import { Routes, Route, NavLink } from "react-router-dom";
-import Home from "./pages/Home";
-import Methodology from "./pages/Methodology";
+import { useEffect, useState } from "react";
+import { NavLink, Route, Routes } from "react-router-dom";
+import { fetchMetadata } from "./api";
+import About from "./pages/About";
+import Changes from "./pages/Changes";
 import Constituents from "./pages/Constituents";
 import History from "./pages/History";
-import Changes from "./pages/Changes";
-import About from "./pages/About";
-import { fetchMetadata } from "./api";
-import { useEffect, useState } from "react";
+import Home from "./pages/Home";
+import Methodology from "./pages/Methodology";
 
 export default function App() {
   const [updated, setUpdated] = useState<string>("");
 
   useEffect(() => {
     fetchMetadata()
-      .then((m) => setUpdated(m.updated))
+      .then((metadata) => setUpdated(metadata.updated))
       .catch(() => undefined);
   }, []);
 
   return (
     <div className="app">
       <header className="site-header">
-        <h1>A股动物园指数</h1>
-        <nav className="site-nav">
+        <div className="site-masthead">
+          <div>
+            <div className="brand-kicker">A-SHARE ZOO INDEX · RULE-BASED RESEARCH</div>
+            <h1>A股动物园指数</h1>
+            <p className="site-deck">
+              把一个看似荒谬的股票分类，做成公开规则、每日更新、可以复查的指数实验。
+            </p>
+          </div>
+          <div className="site-meta" aria-label="数据更新时间">
+            <span>RESEARCH INDEX</span>
+            <strong>{updated || "等待数据"}</strong>
+          </div>
+        </div>
+        <nav className="site-nav" aria-label="主导航">
           <NavLink to="/">首页</NavLink>
           <NavLink to="/methodology">方法</NavLink>
           <NavLink to="/constituents">成分</NavLink>
@@ -41,8 +53,8 @@ export default function App() {
         </Routes>
       </main>
       <footer className="site-footer">
-        数据每日收盘后更新，仅供研究，不构成投资建议。
-        {updated ? `（更新于 ${updated}）` : ""}
+        <span>数据每日收盘后更新 · 规则公开 · 仅供研究</span>
+        <span>不构成投资建议</span>
       </footer>
     </div>
   );

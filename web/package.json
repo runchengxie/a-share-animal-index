@@ -6,6 +6,7 @@
   "scripts": {
     "predev": "node scripts/copy-published-data.mjs",
     "dev": "vite",
+    "test": "node --test src/*.test.mjs",
     "build": "tsc --noEmit && node scripts/copy-published-data.mjs && vite build",
     "preview": "vite preview"
   },

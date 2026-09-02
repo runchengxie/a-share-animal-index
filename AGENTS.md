@@ -25,6 +25,15 @@ uv run ty check
 uv run pytest
 ```
 
+前端检查：
+
+```bash
+cd web
+npm ci
+npm test
+npm run build
+```
+
 每日计算：`uv run zoo-index --output-dir .build/data --backfill`
 本地预览网页：`cd web && npm install && npm run dev`
 
@@ -50,6 +59,8 @@ uv run pytest
 单元测试禁止依赖真实 Tushare Token。使用合成 DataFrame、`tests/fixtures/` 与 `tests/test_runner.py` 内的 `FakeClient`（满足 `TushareLike` 协议）。
 新增计算逻辑时，优先在 `compute_day` 上补测试，保证每日与回填路径被同一组测试覆盖。
 
+前端视觉行为使用 Node 内建测试锁住关键页面结构、研究型视觉 token、响应式约束与图表基础语义。测试不能依赖真实网络请求。生产构建必须继续通过 TypeScript 严格检查与 Vite build。
+
 ## 缓存策略
 
 * 股票列表与更名（`stock_basic` / `namechange`）按 TTL（默认 1 天）刷新，避免长期运行看不到新股 / 退市 / 更名。
@@ -64,5 +75,5 @@ uv run pytest
 
 ## CI 门禁
 
-`.github/workflows/ci.yml` 在推送与 PR 时执行：ruff format 检查、ruff check、ty、pytest、uv audit。
+`.github/workflows/ci.yml` 在推送与 PR 时执行 Python 质量门禁与前端质量门禁。Python 包括 ruff format 检查、ruff check、ty、pytest、uv audit。前端包括 `npm test` 与 `npm run build`。
 `.github/workflows/daily.yml` 在交易日计算并部署到 GitHub Pages，main 分支不提交任何生成物。

@@ -7,32 +7,111 @@ interface Props {
   benchmarkLabel: string;
 }
 
+const STRICT_COLOR = "#1267d6";
+const EXTENDED_COLOR = "#b96800";
+const BENCHMARK_COLOR = "#68717d";
+const RULE_COLOR = "#d9ddd9";
+const MUTED_COLOR = "#7a828c";
+
 export default function ZooChart({ history, benchmarkLabel }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!ref.current) return;
     const chart = echarts.init(ref.current);
-    const dates = history.map((p) => p.date);
-    const strict = history.map((p) => p.zoo_strict_nav);
-    const extended = history.map((p) => p.zoo_extended_nav);
-    const benchmark = history.map((p) => p.benchmark_nav);
+    const dates = history.map((point) => point.date);
+    const strict = history.map((point) => point.zoo_strict_nav);
+    const extended = history.map((point) => point.zoo_extended_nav);
+    const benchmark = history.map((point) => point.benchmark_nav);
 
     chart.setOption({
-      tooltip: { trigger: "axis" },
-      legend: { data: ["严格动物园", "扩展动物园", benchmarkLabel], top: 0 },
-      grid: { left: 50, right: 20, top: 40, bottom: 40 },
+      animationDuration: 280,
+      backgroundColor: "transparent",
+      color: [STRICT_COLOR, EXTENDED_COLOR, BENCHMARK_COLOR],
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "#232a33",
+        borderWidth: 0,
+        padding: [10, 12],
+        textStyle: { color: "#f8f7f2", fontSize: 12 },
+        axisPointer: {
+          type: "line",
+          lineStyle: { color: "#9aa1a8", type: "dashed", width: 1 },
+        },
+      },
+      legend: {
+        data: ["严格动物园", "扩展动物园", benchmarkLabel],
+        top: 0,
+        left: 0,
+        itemWidth: 18,
+        itemHeight: 2,
+        textStyle: { color: MUTED_COLOR, fontSize: 11 },
+      },
+      grid: { left: 52, right: 24, top: 44, bottom: 58 },
       xAxis: {
         type: "category",
+        boundaryGap: false,
         data: dates,
-        axisLabel: { formatter: (value: string) => value.slice(0, 6) },
+        axisLine: { lineStyle: { color: RULE_COLOR } },
+        axisTick: { show: false },
+        axisLabel: {
+          color: MUTED_COLOR,
+          fontSize: 10,
+          hideOverlap: true,
+          formatter: (value: string) => value.slice(0, 7),
+        },
       },
-      yAxis: { type: "value", scale: true },
-      dataZoom: [{ type: "inside" }, { type: "slider" }],
+      yAxis: {
+        type: "value",
+        scale: true,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: MUTED_COLOR, fontSize: 10 },
+        splitLine: { lineStyle: { color: "#e5e6e2", width: 1 } },
+      },
+      dataZoom: [
+        { type: "inside", filterMode: "none" },
+        {
+          type: "slider",
+          height: 14,
+          bottom: 12,
+          borderColor: "transparent",
+          backgroundColor: "#eeede8",
+          fillerColor: "rgba(18, 103, 214, 0.12)",
+          handleSize: "90%",
+          showDetail: false,
+          moveHandleSize: 4,
+          textStyle: { color: MUTED_COLOR },
+        },
+      ],
       series: [
-        { name: "严格动物园", type: "line", data: strict, showSymbol: false, lineStyle: { width: 1.5 } },
-        { name: "扩展动物园", type: "line", data: extended, showSymbol: false, lineStyle: { width: 1.5 } },
-        { name: benchmarkLabel, type: "line", data: benchmark, showSymbol: false, lineStyle: { width: 1.5 } },
+        {
+          name: "严格动物园",
+          type: "line",
+          data: strict,
+          showSymbol: false,
+          connectNulls: false,
+          lineStyle: { width: 2.2, color: STRICT_COLOR },
+          emphasis: { focus: "series" },
+        },
+        {
+          name: "扩展动物园",
+          type: "line",
+          data: extended,
+          showSymbol: false,
+          connectNulls: false,
+          lineStyle: { width: 2, color: EXTENDED_COLOR },
+          emphasis: { focus: "series" },
+        },
+        {
+          name: benchmarkLabel,
+          type: "line",
+          data: benchmark,
+          showSymbol: false,
+          connectNulls: false,
+          lineStyle: { width: 1.5, color: BENCHMARK_COLOR, type: "dashed" },
+          emphasis: { focus: "series" },
+        },
       ],
     });
 
@@ -44,5 +123,5 @@ export default function ZooChart({ history, benchmarkLabel }: Props) {
     };
   }, [history, benchmarkLabel]);
 
-  return <div ref={ref} className="zoo-chart" />;
+  return <div ref={ref} className="zoo-chart" role="img" aria-label="动物园指数净值走势图" />;
 }
