@@ -1,5 +1,7 @@
 # 动物园指数
 
+[GitHub Pages 在线预览](https://runchengxie.github.io/a-share-animal-index/) · [Cloudflare Pages 在线预览](https://a-share-animal-index.pages.dev/)
+
 把 A 股简称里含动物词的股票收编成组合，按固定规则每日更新，并与沪深300对比。可能是全网第一个 A 股动物园指数。
 
 > 本项目仅供娱乐与研究，不构成任何投资建议。
@@ -68,7 +70,7 @@ npm run dev
 
 ## 部署
 
-默认走 GitHub Pages：`.github/workflows/daily.yml` 在每个交易日收盘后自动计算并部署。使用前只需两步：在仓库 Secrets 添加 `TUSHARE_TOKEN`，并在 Pages 设置里把来源改为 GitHub Actions。细节与 Cloudflare 备选方案见 [docs/architecture.md](docs/architecture.md#部署)。
+项目同时部署到 GitHub Pages 和 Cloudflare Pages：`.github/workflows/daily.yml` 在每个交易日收盘后计算数据并部署 GitHub Pages；`.github/workflows/deploy-cloudflare.yml` 在 `main` 更新后使用仓库中的 `published/data` 构建并部署 Cloudflare Pages。GitHub Actions 需要配置 `TUSHARE_TOKEN`、`CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。细节见 [docs/architecture.md](docs/architecture.md#部署)。
 
 ## 开发与测试
 
