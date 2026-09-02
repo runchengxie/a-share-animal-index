@@ -2,13 +2,14 @@
 
 把 A 股简称里含动物词的股票收编成组合，按固定规则每日更新，并与沪深300对比。可能是全网第一个 A 股动物园指数。
 
-> 本项目仅供娱乐，不构成任何投资建议。
+> 本项目仅供娱乐与研究，不构成任何投资建议。
 
 ## 它能做什么
 
 - 严格动物园 / 扩展动物园双指数，与沪深300对照
 - 规则词表 + 强制名单，结果可复现
 - 每日生成净值、曲线图、徽章与网页
+- 网页按研究报告式信息层级展示指数快照、净值、调仓、成分与方法
 
 ## 快速开始
 
@@ -71,8 +72,19 @@ npm run dev
 
 ## 开发与测试
 
+Python 计算与数据逻辑：
+
 ```bash
 uv run pytest
 ```
 
-质量门禁（ruff / ty / pytest / uv audit）由 `.github/workflows/ci.yml` 在每次推送与 PR 时执行。
+前端视觉契约与生产构建：
+
+```bash
+cd web
+npm ci
+npm test
+npm run build
+```
+
+质量门禁由 `.github/workflows/ci.yml` 在每次推送与 PR 时执行，包括 ruff、ty、pytest、uv audit，以及前端 Node 契约测试与 Vite production build。

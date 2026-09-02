@@ -37,3 +37,27 @@ jobs:
         # 数据科学依赖（idna/lxml/pillow 等）存在较多传递依赖 CVE，
         # 这些告警不阻断合并，仅作为可见性报告。
         continue-on-error: true
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend contract tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
