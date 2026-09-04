@@ -18,7 +18,7 @@ from zoo_index.runner import (
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="A股动物园指数每日运行脚本")
+    parser = argparse.ArgumentParser(description="A股动物园与植物园指数运行脚本")
     parser.add_argument("--date", type=str, default="", help="交易日 YYYYMMDD")
     parser.add_argument("--rules", type=str, default="", help="规则文件路径")
     parser.add_argument("--token", type=str, default="", help="Tushare Token")

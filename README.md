@@ -1,6 +1,6 @@
-# 动物园指数 / 植物园指数
+# A 股动物园与植物园
 
-[GitHub Pages 在线预览](https://runchengxie.github.io/a-share-animal-index/) · [Cloudflare Pages 在线预览](https://a-share-animal-index.pages.dev/)
+[GitHub Pages 在线预览](https://runchengxie.github.io/a-share-zoo-garden/) · [Cloudflare Pages 在线预览](https://a-share-zoo-garden.pages.dev/)
 
 把 A 股简称里含动物词或植物词的股票收编成主题组合，按固定规则每日更新，并与沪深300对比。动物园是成熟主线，植物园目前先以保守词表作为候选实验。
 

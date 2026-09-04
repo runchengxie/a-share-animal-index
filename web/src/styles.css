@@ -501,6 +501,15 @@ h2 {
   border-left: 1px solid var(--rule);
 }
 
+.theme-record + .theme-record {
+  margin-top: 28px;
+}
+
+.theme-record h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
 .changes-list > .muted {
   grid-column: 1 / -1;
   margin: 0;

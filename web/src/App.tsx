@@ -21,8 +21,8 @@ export default function App() {
       <header className="site-header">
         <div className="site-masthead">
           <div>
-            <div className="brand-kicker">A 股动物园 · 规则化研究</div>
-            <h1>A 股动物园指数</h1>
+            <div className="brand-kicker">A 股动物园与植物园 · 规则化研究</div>
+            <h1>A 股动物园与植物园</h1>
             <p className="site-deck">
               把一个看似荒谬的股票分类，做成公开规则、每日更新、可以复查的指数实验。
             </p>

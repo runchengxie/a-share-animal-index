@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
-import { fetchChanges, type Changes as ChangesData } from "../api";
+import { fetchThemeChanges, type Changes as ChangesData, type IndexTheme } from "../api";
 import ChangesList from "../components/ChangesList";
+
+const THEME_LABELS: Record<IndexTheme, string> = { animal: "动物园", plant: "植物园" };
 
 type State =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ok"; changes: ChangesData };
+  | { status: "ok"; changes: Record<IndexTheme, ChangesData> };
 
 export default function Changes() {
   const [state, setState] = useState<State>({ status: "loading" });
 
   useEffect(() => {
-    fetchChanges()
-      .then((changes) => setState({ status: "ok", changes }))
+    Promise.all([fetchThemeChanges("animal"), fetchThemeChanges("plant")])
+      .then(([animal, plant]) => setState({ status: "ok", changes: { animal, plant } }))
       .catch((err) => setState({ status: "error", message: String(err) }));
   }, []);
 
@@ -22,7 +24,12 @@ export default function Changes() {
   return (
     <div className="page-changes">
       <h2>调仓记录</h2>
-      <ChangesList changes={state.changes} />
+      {(["animal", "plant"] as IndexTheme[]).map((theme) => (
+        <section className="theme-record" key={theme}>
+          <h3>{THEME_LABELS[theme]}</h3>
+          <ChangesList changes={state.changes[theme]} themeLabel={THEME_LABELS[theme]} />
+        </section>
+      ))}
     </div>
   );
 }
