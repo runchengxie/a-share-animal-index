@@ -3,7 +3,6 @@ from pathlib import Path
 from zoo_index.config import load_rules
 from zoo_index.matcher import Matcher
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
