@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pandas as pd
 
@@ -43,6 +44,31 @@ def test_compute_changes_handles_empty_previous() -> None:
 
     assert _code_set(changes["strict"]["new_in"]) == {"000001.SZ"}
     assert _code_set(changes["strict"]["removed"]) == set()
+
+
+def test_update_nav_keeps_gross_fields_and_writes_net_fields(tmp_path: Path) -> None:
+    from zoo_index.outputs import update_nav
+
+    nav, latest = update_nav(
+        tmp_path / "nav.csv",
+        "20240102",
+        0.1,
+        0.2,
+        0.05,
+        strict_net_ret=0.09,
+        extended_net_ret=0.18,
+        strict_turnover=0.2,
+        extended_turnover=0.3,
+        strict_cost=0.01,
+        extended_cost=0.02,
+    )
+
+    assert latest["zoo_strict_ret"] == 0.1
+    assert latest["zoo_strict_net_ret"] == 0.09
+    assert latest["zoo_strict_net_nav"] == 1.09
+    assert latest["zoo_strict_turnover"] == 0.2
+    assert latest["zoo_strict_cost"] == 0.01
+    assert "zoo_extended_net_nav" in nav.columns
 
 
 def test_compute_suspected_noise_filters_single_keywords() -> None:

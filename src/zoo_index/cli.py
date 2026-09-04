@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 
+from zoo_index.config import load_backtest_config
 from zoo_index.runner import (
     DEFAULT_BACKFILL_YEARS,
     DEFAULT_BENCHMARK_CODE,
@@ -153,6 +154,7 @@ def build_run_config(args: argparse.Namespace, repo_root: Path) -> RunConfig | N
         no_rules_snapshot=args.no_rules_snapshot,
         no_cache=args.no_cache,
         force_refresh=args.force_refresh,
+        backtest=load_backtest_config(repo_root / "backtest.yml"),
     )
 
 

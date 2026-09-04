@@ -5,11 +5,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from zoo_index.config import Rules, load_rules
+from zoo_index.config import BacktestConfig, Rules, load_rules
 from zoo_index.data_sources.tushare import TradeCalendarEntry
 from zoo_index.runner import (
     BenchmarkConfig,
     RunConfig,
+    _build_nav_from_returns,
     _get_benchmark_return,
     _snapshot_rules,
     compute_day,
@@ -117,6 +118,79 @@ class FakeClient:
 
 def _rules() -> Rules:
     return load_rules(Path(__file__).resolve().parent.parent / "rules.yml")
+
+
+def test_compute_day_reports_opt_in_trade_costs() -> None:
+    client = FakeClient(
+        ["20240101", "20240102", "20240103"],
+        {"000001.SZ": (1.01, 1.0), "600000.SH": (1.01, 1.0)},
+    )
+    result = compute_day(
+        client,
+        _rules(),
+        BenchmarkConfig("000300.SH", "index", "HS300"),
+        "20240102",
+        client.get_stock_basic(),
+        client.get_namechange(),
+        backtest=BacktestConfig(enabled=True, commission_rate=0.001),
+    )
+
+    assert result.strict_cost == pytest.approx(0.001)
+    assert result.strict_net_ret == pytest.approx(result.strict_ret - 0.001)
+
+
+def test_compute_day_does_not_charge_monthly_costs_on_hold_days() -> None:
+    client = FakeClient(
+        ["20240101", "20240102", "20240103"],
+        {"000001.SZ": (1.01, 1.0), "600000.SH": (1.01, 1.0)},
+    )
+    rules = _rules()
+    benchmark = BenchmarkConfig("000300.SH", "index", "HS300")
+    stock_basic = client.get_stock_basic()
+    namechange = client.get_namechange()
+    backtest = BacktestConfig(enabled=True, commission_rate=0.001)
+    first = compute_day(
+        client, rules, benchmark, "20240102", stock_basic, namechange, backtest=backtest
+    )
+    second = compute_day(
+        client,
+        rules,
+        benchmark,
+        "20240103",
+        stock_basic,
+        namechange,
+        prev_state=first.state,
+        backtest=backtest,
+    )
+
+    assert second.strict_cost == 0.0
+    assert second.extended_cost == 0.0
+
+
+def test_build_nav_backfills_net_fields_for_legacy_rows() -> None:
+    returns = pd.DataFrame(
+        [
+            {
+                "date": "20240101",
+                "zoo_strict_ret": 0.1,
+                "zoo_extended_ret": 0.2,
+                "benchmark_ret": 0.0,
+            },
+            {
+                "date": "20240102",
+                "zoo_strict_ret": 0.0,
+                "zoo_extended_ret": 0.0,
+                "benchmark_ret": 0.0,
+                "zoo_strict_net_ret": -0.01,
+                "zoo_extended_net_ret": -0.02,
+            },
+        ]
+    )
+
+    nav = _build_nav_from_returns(returns)
+
+    assert nav["zoo_strict_net_nav"].tolist() == pytest.approx([1.1, 1.089])
+    assert nav["zoo_extended_net_nav"].tolist() == pytest.approx([1.2, 1.176])
 
 
 def _rules_with_forces(
