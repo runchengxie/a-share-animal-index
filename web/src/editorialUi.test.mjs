@@ -6,6 +6,7 @@ const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const home = readFileSync(new URL("./pages/Home.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const chart = readFileSync(new URL("./components/ZooChart.tsx", import.meta.url), "utf8");
+const constituentsTable = readFileSync(new URL("./components/ConstituentsTable.tsx", import.meta.url), "utf8");
 const api = readFileSync(new URL("./api.ts", import.meta.url), "utf8");
 
 test("site shell exposes an editorial masthead and research navigation", () => {
@@ -49,4 +50,9 @@ test("NAV chart follows the low-noise research palette", () => {
   assert.match(chart, /#1267d6/);
   assert.match(chart, /#b96800/);
   assert.match(chart, /#68717d/);
+});
+
+test("constituent groups can be collapsed", () => {
+  assert.match(constituentsTable, /<details/);
+  assert.match(constituentsTable, /<summary/);
 });

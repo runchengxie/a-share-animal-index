@@ -9,7 +9,6 @@ type State =
 
 export default function Constituents() {
   const [state, setState] = useState<State>({ status: "loading" });
-  const [variant, setVariant] = useState<"strict" | "extended">("strict");
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -18,15 +17,18 @@ export default function Constituents() {
       .catch((err) => setState({ status: "error", message: String(err) }));
   }, []);
 
-  const items = useMemo(() => {
-    if (state.status !== "ok") return [];
-    const list = variant === "strict" ? state.data.strict : state.data.extended;
-    if (!query.trim()) return list;
+  const filterItems = (items: ConstituentsData["strict"]) => {
+    if (!query.trim()) return items;
     const q = query.trim();
-    return list.filter(
+    return items.filter(
       (c) => c.name.includes(q) || c.ts_code.includes(q) || c.keyword.includes(q)
     );
-  }, [state, variant, query]);
+  };
+
+  const filtered = useMemo(() => {
+    if (state.status !== "ok") return { strict: [], extended: [] };
+    return { strict: filterItems(state.data.strict), extended: filterItems(state.data.extended) };
+  }, [state, query]);
 
   if (state.status === "loading") return <p>数据加载中…</p>;
   if (state.status === "error") return <p className="muted">数据加载失败：{state.message}</p>;
@@ -36,22 +38,7 @@ export default function Constituents() {
       <h2>当前成分</h2>
       <p className="muted">成分日期：{state.data.date}</p>
       <div className="toolbar">
-        <label>
-          <input
-            type="radio"
-            checked={variant === "strict"}
-            onChange={() => setVariant("strict")}
-          />
-          严格
-        </label>
-        <label>
-          <input
-            type="radio"
-            checked={variant === "extended"}
-            onChange={() => setVariant("extended")}
-          />
-          扩展
-        </label>
+        <span className="toolbar-hint">展开下方分组查看成分</span>
         <input
           type="text"
           placeholder="筛选名称/代码/匹配词"
@@ -59,7 +46,8 @@ export default function Constituents() {
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
-      <ConstituentsTable variant={variant} items={items} />
+      <ConstituentsTable variant="strict" items={filtered.strict} />
+      <ConstituentsTable variant="extended" items={filtered.extended} />
     </div>
   );
 }
