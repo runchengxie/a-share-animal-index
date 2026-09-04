@@ -28,15 +28,69 @@
   ],
   "extended": [
     {
+      "ts_code": "000528.SZ",
+      "name": "柳工",
+      "keyword": "柳工",
+      "forced": false
+    },
+    {
+      "ts_code": "000716.SZ",
+      "name": "黑芝麻",
+      "keyword": "黑芝麻",
+      "forced": false
+    },
+    {
+      "ts_code": "000789.SZ",
+      "name": "万年青",
+      "keyword": "万年青",
+      "forced": false
+    },
+    {
       "ts_code": "000812.SZ",
       "name": "陕西金叶",
       "keyword": "金叶",
       "forced": false
     },
     {
+      "ts_code": "001300.SZ",
+      "name": "三柏硕",
+      "keyword": "三柏",
+      "forced": false
+    },
+    {
+      "ts_code": "002050.SZ",
+      "name": "三花智控",
+      "keyword": "三花",
+      "forced": false
+    },
+    {
       "ts_code": "002058.SZ",
       "name": "紫竹高科",
       "keyword": "紫竹",
+      "forced": false
+    },
+    {
+      "ts_code": "002577.SZ",
+      "name": "雷柏科技",
+      "keyword": "雷柏",
+      "forced": false
+    },
+    {
+      "ts_code": "002737.SZ",
+      "name": "葵花药业",
+      "keyword": "葵花",
+      "forced": false
+    },
+    {
+      "ts_code": "300111.SZ",
+      "name": "向日葵",
+      "keyword": "向日葵",
+      "forced": false
+    },
+    {
+      "ts_code": "301111.SZ",
+      "name": "粤万年青",
+      "keyword": "万年青",
       "forced": false
     },
     {
@@ -76,9 +130,27 @@
       "forced": false
     },
     {
+      "ts_code": "600884.SH",
+      "name": "杉杉股份",
+      "keyword": "杉杉",
+      "forced": false
+    },
+    {
+      "ts_code": "601003.SH",
+      "name": "柳钢股份",
+      "keyword": "柳钢",
+      "forced": false
+    },
+    {
       "ts_code": "603102.SH",
       "name": "百合股份",
       "keyword": "百合",
+      "forced": false
+    },
+    {
+      "ts_code": "603268.SH",
+      "name": "松发股份",
+      "keyword": "松发",
       "forced": false
     },
     {
@@ -88,9 +160,27 @@
       "forced": false
     },
     {
+      "ts_code": "603580.SH",
+      "name": "艾艾精工",
+      "keyword": "艾艾",
+      "forced": false
+    },
+    {
       "ts_code": "603615.SH",
       "name": "茶花股份",
       "keyword": "茶花",
+      "forced": false
+    },
+    {
+      "ts_code": "603638.SH",
+      "name": "艾迪精密",
+      "keyword": "艾迪",
+      "forced": false
+    },
+    {
+      "ts_code": "603737.SH",
+      "name": "三棵树",
+      "keyword": "三棵树",
       "forced": false
     },
     {
@@ -103,6 +193,18 @@
       "ts_code": "603866.SH",
       "name": "桃李面包",
       "keyword": "桃李",
+      "forced": false
+    },
+    {
+      "ts_code": "605167.SH",
+      "name": "利柏特",
+      "keyword": "利柏",
+      "forced": false
+    },
+    {
+      "ts_code": "688488.SH",
+      "name": "艾迪药业",
+      "keyword": "艾迪",
       "forced": false
     }
   ]

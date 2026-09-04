@@ -8,6 +8,14 @@
   "benchmark_daily": -0.001082,
   "zoo_strict_excess": -0.009418,
   "zoo_extended_excess": -0.002401,
+  "zoo_strict_net_nav": 1.729482,
+  "zoo_extended_net_nav": 1.432976,
+  "zoo_strict_net_daily": -0.0105,
+  "zoo_extended_net_daily": -0.003483,
+  "zoo_strict_turnover": 0.0,
+  "zoo_extended_turnover": 0.0,
+  "zoo_strict_cost": 0.0,
+  "zoo_extended_cost": 0.0,
   "benchmark_code": "510300.SH",
   "benchmark_label": "HS300 ETF"
 }
