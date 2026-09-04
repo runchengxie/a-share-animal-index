@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "10 8 * * 1-5"
   workflow_dispatch:
+    inputs:
+      backfill_mode:
+        description: "回填模式：missing 只补缺失日期，all 重算指定历史区间"
+        required: false
+        default: missing
+        type: choice
+        options:
+          - missing
+          - all
 
 permissions:
   contents: write
@@ -39,12 +48,14 @@ jobs:
       - name: Compute index (增量，仅补缺失交易日)
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-        run: uv run python -m zoo_index --output-dir published --backfill
+          BACKFILL_MODE: ${{ inputs.backfill_mode || 'missing' }}
+        run: uv run python -m zoo_index --output-dir published --backfill --backfill-mode "$BACKFILL_MODE"
 
       - name: Compute plant index (增量，仅补缺失交易日)
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-        run: uv run python -m zoo_index --rules plant_rules.yml --output-dir published/plant --backfill
+          BACKFILL_MODE: ${{ inputs.backfill_mode || 'missing' }}
+        run: uv run python -m zoo_index --rules plant_rules.yml --output-dir published/plant --backfill --backfill-mode "$BACKFILL_MODE"
 
       - name: Commit data
         run: |
