@@ -8,6 +8,7 @@ const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const chart = readFileSync(new URL("./components/ZooChart.tsx", import.meta.url), "utf8");
 const constituentsTable = readFileSync(new URL("./components/ConstituentsTable.tsx", import.meta.url), "utf8");
 const changesList = readFileSync(new URL("./components/ChangesList.tsx", import.meta.url), "utf8");
+const changesPage = readFileSync(new URL("./pages/Changes.tsx", import.meta.url), "utf8");
 const constituentsPage = readFileSync(new URL("./pages/Constituents.tsx", import.meta.url), "utf8");
 const api = readFileSync(new URL("./api.ts", import.meta.url), "utf8");
 
@@ -66,10 +67,16 @@ test("change groups are collapsed by default", () => {
 });
 
 test("change page loads both themes", () => {
-  const changesPage = readFileSync(new URL("./pages/Changes.tsx", import.meta.url), "utf8");
   assert.match(changesPage, /fetchThemeChanges\("animal"\)/);
   assert.match(changesPage, /fetchThemeChanges\("plant"\)/);
   assert.match(changesPage, /植物园/);
+  assert.match(changesPage, /动物园与植物园/);
+});
+
+test("site titles describe both themes", () => {
+  assert.match(app, /A 股动物园与植物园 · 规则化研究/);
+  assert.match(app, /<h1>A 股动物园与植物园<\/h1>/);
+  assert.match(changesPage, /动物园与植物园分别展示最近一次成分变化/);
 });
 
 test("constituent page loads both themes", () => {

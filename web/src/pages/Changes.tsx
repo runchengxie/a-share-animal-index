@@ -24,6 +24,7 @@ export default function Changes() {
   return (
     <div className="page-changes">
       <h2>调仓记录</h2>
+      <p className="muted">动物园与植物园分别展示最近一次成分变化及疑似误匹配。</p>
       {(["animal", "plant"] as IndexTheme[]).map((theme) => (
         <section className="theme-record" key={theme}>
           <h3>{THEME_LABELS[theme]}</h3>
