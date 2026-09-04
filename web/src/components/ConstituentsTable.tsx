@@ -8,10 +8,8 @@ interface Props {
 export default function ConstituentsTable({ variant, items }: Props) {
   const title = variant === "strict" ? "严格动物园成分" : "扩展动物园成分";
   return (
-    <section className="constituents-table">
-      <h3>
-        {title}（{items.length}）
-      </h3>
+    <details className="constituents-table" open={variant === "strict"}>
+      <summary>{title}（{items.length}）</summary>
       {items.length === 0 ? (
         <p className="muted">暂无成分。</p>
       ) : (
@@ -36,6 +34,6 @@ export default function ConstituentsTable({ variant, items }: Props) {
           </tbody>
         </table>
       )}
-    </section>
+    </details>
   );
 }
