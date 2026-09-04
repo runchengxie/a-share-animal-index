@@ -1,5 +1,5 @@
 {
-  "date": "20260903",
+  "date": "20260904",
   "strict": [
     {
       "ts_code": "000572.SZ",
@@ -726,7 +726,7 @@
     {
       "ts_code": "600993.SH",
       "name": "马应龙",
-      "keyword": "龙",
+      "keyword": "马",
       "forced": false
     },
     {
@@ -864,7 +864,7 @@
     {
       "ts_code": "603686.SH",
       "name": "福龙马",
-      "keyword": "龙",
+      "keyword": "马",
       "forced": false
     },
     {
