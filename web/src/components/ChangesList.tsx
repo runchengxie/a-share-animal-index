@@ -2,8 +2,8 @@ import { Changes, ChangeSet, Constituent } from "../api";
 
 function ChangeSection({ title, set }: { title: string; set: ChangeSet }) {
   return (
-    <div className="change-section">
-      <h4>{title}</h4>
+    <details className="change-section">
+      <summary>{title}</summary>
       {set.new_in.length === 0 && set.removed.length === 0 ? (
         <p className="muted">无变动。</p>
       ) : (
@@ -20,14 +20,14 @@ function ChangeSection({ title, set }: { title: string; set: ChangeSet }) {
           ))}
         </ul>
       )}
-    </div>
+    </details>
   );
 }
 
 function NoiseSection({ title, items }: { title: string; items: Constituent[] }) {
   return (
-    <div className="change-section">
-      <h4>{title}</h4>
+    <details className="change-section">
+      <summary>{title}</summary>
       {items.length === 0 ? (
         <p className="muted">暂无疑似误匹配。</p>
       ) : (
@@ -39,7 +39,7 @@ function NoiseSection({ title, items }: { title: string; items: Constituent[] })
           ))}
         </ul>
       )}
-    </div>
+    </details>
   );
 }
 
