@@ -13,6 +13,7 @@ test("site shell exposes an editorial masthead and research navigation", () => {
   assert.match(app, /A 股动物园/);
   assert.match(app, /site-deck/);
   assert.match(app, /site-nav/);
+  assert.doesNotMatch(app, /theme-link/);
 });
 
 test("home page leads with a research question and index snapshot", () => {
@@ -28,7 +29,7 @@ test("home page leads with a research question and index snapshot", () => {
 });
 
 test("theme data is loaded from an independent plant snapshot", () => {
-  assert.match(app, /植物园/);
+  assert.match(home, /植物园/);
   assert.match(api, /plant\//);
 });
 

@@ -33,8 +33,6 @@ export default function App() {
           </div>
         </div>
         <nav className="site-nav" aria-label="主导航">
-          <a className="theme-link" href="#animal-panel">动物园</a>
-          <a className="theme-link" href="#plant-panel">植物园</a>
           <NavLink to="/">首页</NavLink>
           <NavLink to="/methodology">方法</NavLink>
           <NavLink to="/constituents">成分</NavLink>
