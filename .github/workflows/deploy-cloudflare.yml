@@ -23,6 +23,8 @@ jobs:
         run: |
           mkdir -p web/public/data
           cp published/data/*.json web/public/data/
+          mkdir -p web/public/data/plant
+          cp published/plant/data/*.json web/public/data/plant/
 
       - name: Build web
         working-directory: web
