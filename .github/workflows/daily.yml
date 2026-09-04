@@ -13,6 +13,11 @@ on:
         options:
           - missing
           - all
+      backfill_days:
+        description: "手动回填交易日数量；默认 1，仅刷新最近交易日"
+        required: false
+        default: "1"
+        type: string
 
 permissions:
   contents: write
@@ -45,17 +50,19 @@ jobs:
       - name: Install Python deps
         run: uv sync --frozen
 
-      - name: Compute index (增量，仅补缺失交易日)
+      - name: Compute index (更新最近交易日)
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           BACKFILL_MODE: ${{ inputs.backfill_mode || 'missing' }}
-        run: uv run python -m zoo_index --output-dir published --backfill --backfill-mode "$BACKFILL_MODE"
+          BACKFILL_DAYS: ${{ inputs.backfill_days || '1' }}
+        run: uv run python -m zoo_index --output-dir published --backfill "$BACKFILL_DAYS" --backfill-mode "$BACKFILL_MODE"
 
-      - name: Compute plant index (增量，仅补缺失交易日)
+      - name: Compute plant index (更新最近交易日)
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           BACKFILL_MODE: ${{ inputs.backfill_mode || 'missing' }}
-        run: uv run python -m zoo_index --rules plant_rules.yml --output-dir published/plant --backfill --backfill-mode "$BACKFILL_MODE"
+          BACKFILL_DAYS: ${{ inputs.backfill_days || '1' }}
+        run: uv run python -m zoo_index --rules plant_rules.yml --output-dir published/plant --backfill "$BACKFILL_DAYS" --backfill-mode "$BACKFILL_MODE"
 
       - name: Commit data
         run: |
