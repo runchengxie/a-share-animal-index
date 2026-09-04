@@ -1,0 +1,28 @@
+# 第一版植物园规则：先收录语义明确、误匹配相对少的植物词。
+strict_keywords:
+  - 兰花
+  - 梅花
+  - 棕榈
+  - 银杏
+  - 牡丹
+  - 莲花
+  - 荷花
+  - 桂花
+  - 椰树
+  - 红豆杉
+  - 香梨
+
+# 暂不启用单字植物词，避免“松、竹、杉、柏、茶、药”等造成大量品牌或行业误匹配。
+extended_keywords: []
+
+exclude_patterns:
+  - 梅钢
+  - 兰州
+  - 桂林
+  - 香江
+
+force_include: []
+force_exclude: []
+
+exclude_st: true
+allow_beijing: false
