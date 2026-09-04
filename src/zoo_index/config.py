@@ -23,6 +23,14 @@ class Rules:
     max_suspension_days: int = 0
 
 
+@dataclass(frozen=True)
+class BacktestConfig:
+    enabled: bool = False
+    commission_rate: float = 0.0
+    stamp_tax_rate: float = 0.0
+    slippage_rate: float = 0.0
+
+
 _TS_CODE_RE = re.compile(r"^\d{6}\.(SZ|SH|BJ)$", re.IGNORECASE)
 
 
@@ -93,6 +101,21 @@ def _rules_from_dict(data: object) -> Rules:
 def load_rules(path: Path) -> Rules:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return _rules_from_dict(data)
+
+
+def load_backtest_config(path: Path) -> BacktestConfig:
+    if not path.exists():
+        return BacktestConfig()
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        data = {}
+    rates = {
+        name: float(data.get(name, 0.0) or 0.0)
+        for name in ("commission_rate", "stamp_tax_rate", "slippage_rate")
+    }
+    if any(value < 0 for value in rates.values()):
+        raise ValueError("backtest cost rates must be non-negative")
+    return BacktestConfig(enabled=bool(data.get("enabled", False)), **rates)
 
 
 def load_rules_asof(

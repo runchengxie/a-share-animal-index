@@ -38,6 +38,13 @@ def update_nav(
     strict_ret: float,
     extended_ret: float,
     benchmark_ret: float,
+    *,
+    strict_net_ret: float | None = None,
+    extended_net_ret: float | None = None,
+    strict_turnover: float = 0.0,
+    extended_turnover: float = 0.0,
+    strict_cost: float = 0.0,
+    extended_cost: float = 0.0,
 ) -> tuple[pd.DataFrame, pd.Series]:
     nav_df = load_nav(nav_path)
     if not nav_df.empty:
@@ -47,12 +54,19 @@ def update_nav(
         prev_strict = 1.0
         prev_extended = 1.0
         prev_benchmark = 1.0
+        prev_strict_net = 1.0
+        prev_extended_net = 1.0
     else:
         nav_df = nav_df.sort_values("date")
         last = nav_df.iloc[-1]
         prev_strict = float(last["zoo_strict_nav"])
         prev_extended = float(last["zoo_extended_nav"])
         prev_benchmark = float(last["benchmark_nav"])
+        prev_strict_net = float(last.get("zoo_strict_net_nav", prev_strict))
+        prev_extended_net = float(last.get("zoo_extended_net_nav", prev_extended))
+
+    strict_net_ret = strict_ret if strict_net_ret is None else strict_net_ret
+    extended_net_ret = extended_ret if extended_net_ret is None else extended_net_ret
 
     row = {
         "date": date,
@@ -62,6 +76,14 @@ def update_nav(
         "zoo_strict_nav": prev_strict * (1 + strict_ret),
         "zoo_extended_nav": prev_extended * (1 + extended_ret),
         "benchmark_nav": prev_benchmark * (1 + benchmark_ret),
+        "zoo_strict_net_ret": strict_net_ret,
+        "zoo_extended_net_ret": extended_net_ret,
+        "zoo_strict_net_nav": prev_strict_net * (1 + strict_net_ret),
+        "zoo_extended_net_nav": prev_extended_net * (1 + extended_net_ret),
+        "zoo_strict_turnover": strict_turnover,
+        "zoo_extended_turnover": extended_turnover,
+        "zoo_strict_cost": strict_cost,
+        "zoo_extended_cost": extended_cost,
     }
 
     nav_df = pd.concat([nav_df, pd.DataFrame([row])], ignore_index=True)
@@ -170,6 +192,22 @@ def generate_latest_json(
         "zoo_extended_excess": round(
             float(latest["zoo_extended_ret"] - latest["benchmark_ret"]), 6
         ),
+        "zoo_strict_net_nav": round(
+            float(latest.get("zoo_strict_net_nav", latest["zoo_strict_nav"])), 6
+        ),
+        "zoo_extended_net_nav": round(
+            float(latest.get("zoo_extended_net_nav", latest["zoo_extended_nav"])), 6
+        ),
+        "zoo_strict_net_daily": round(
+            float(latest.get("zoo_strict_net_ret", latest["zoo_strict_ret"])), 6
+        ),
+        "zoo_extended_net_daily": round(
+            float(latest.get("zoo_extended_net_ret", latest["zoo_extended_ret"])), 6
+        ),
+        "zoo_strict_turnover": round(float(latest.get("zoo_strict_turnover", 0.0)), 6),
+        "zoo_extended_turnover": round(float(latest.get("zoo_extended_turnover", 0.0)), 6),
+        "zoo_strict_cost": round(float(latest.get("zoo_strict_cost", 0.0)), 6),
+        "zoo_extended_cost": round(float(latest.get("zoo_extended_cost", 0.0)), 6),
         "benchmark_code": benchmark_code,
         "benchmark_label": benchmark_label,
     }
@@ -192,6 +230,18 @@ def generate_history_json(
                 "zoo_strict_nav": round(float(row["zoo_strict_nav"]), 6),
                 "zoo_extended_nav": round(float(row["zoo_extended_nav"]), 6),
                 "benchmark_nav": round(float(row["benchmark_nav"]), 6),
+                "zoo_strict_net_ret": round(
+                    float(row.get("zoo_strict_net_ret", row["zoo_strict_ret"])), 8
+                ),
+                "zoo_extended_net_ret": round(
+                    float(row.get("zoo_extended_net_ret", row["zoo_extended_ret"])), 8
+                ),
+                "zoo_strict_net_nav": round(
+                    float(row.get("zoo_strict_net_nav", row["zoo_strict_nav"])), 6
+                ),
+                "zoo_extended_net_nav": round(
+                    float(row.get("zoo_extended_net_nav", row["zoo_extended_nav"])), 6
+                ),
             }
             for _, row in ordered.iterrows()
         ]

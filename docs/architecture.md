@@ -50,6 +50,7 @@
 - 月度首个交易日触发再平衡：用上一篮子计算当日收益（去前视），新篮子等权后于次日生效。
 - 月内沿用上一篮子与固定权重，不再每日重算。
 - 异常再平衡：持有成分出现退市、新 ST 或连续停牌超阈值时，剔除触发成分并重新等权，新权重当日生效。
+- 可交易回测：`backtest.yml` 默认关闭。开启后保留毛收益，同时追加价格漂移后的换手、佣金、印花税、滑点和成本后净值字段。
 - 规则时点化：`_get_constituents_for_rebalance` 在每次再平衡时按 `rules_path` 调用 `load_rules_asof`，使用当时生效的规则版本。
 - 状态重建：`run_daily` 从上一交易日的 `holdings_YYYYMMDD.csv` 读取权重与停牌天数重建 `PortfolioState`；`run_backfill` 在回填循环中按日向后传递状态，保证历史可复现且无前视。
 
@@ -87,6 +88,8 @@ export TUSHARE_API_URL=https://<转发代理地址>
 - 快照：`--backfill-write-snapshots` 生成每日持仓快照；`--no-rules-snapshot` 关闭规则快照。
 - 缓存：默认启用 `data/cache/`；`--no-cache` 禁用，`--force-refresh` 强制刷新。
 - 基准：`--benchmark` / `--benchmark-source` / `--benchmark-label` 切换基准。ETF 基准需 `fund_daily` / `fund_adj` 权限（约 2000 积分）；权限不足可回退到 `--benchmark-source index --benchmark 000300.SH` 的价格口径。
+
+可交易回测参数位于仓库根目录 `backtest.yml`，默认 `enabled: false` 且各项成本率为 0。启用后，`nav.csv` 会增加 `zoo_*_net_ret`、`zoo_*_net_nav`、`zoo_*_turnover` 和 `zoo_*_cost` 字段。
 
 仅重绘图表（不调用 Tushare）：
 

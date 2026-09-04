@@ -1,0 +1,5 @@
+# 可交易回测参数。默认关闭且零成本，不改变理论指数口径。
+enabled: false
+commission_rate: 0.0
+stamp_tax_rate: 0.0
+slippage_rate: 0.0

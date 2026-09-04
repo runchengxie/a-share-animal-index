@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from zoo_index.config import load_rules, load_rules_asof
+from zoo_index.config import BacktestConfig, load_rules, load_rules_asof
 from zoo_index.data_sources.tushare import (
     BenchmarkSourceLike,
     DailySourceLike,
@@ -41,6 +41,7 @@ from zoo_index.outputs import (
     save_holdings,
     update_nav,
 )
+from zoo_index.trading import TradeCostConfig, compute_trade_accounting
 
 DEFAULT_BACKFILL_YEARS = 5
 DEFAULT_COMPLETE_LOOKBACK = 10
@@ -73,6 +74,12 @@ class DailyResult:
     benchmark_code: str
     benchmark_label: str
     state: PortfolioState | None = None
+    strict_net_ret: float | None = None
+    extended_net_ret: float | None = None
+    strict_turnover: float = 0.0
+    extended_turnover: float = 0.0
+    strict_cost: float = 0.0
+    extended_cost: float = 0.0
 
 
 @dataclass
@@ -91,6 +98,7 @@ class RunConfig:
     no_rules_snapshot: bool = False
     no_cache: bool = False
     force_refresh: bool = False
+    backtest: BacktestConfig = field(default_factory=BacktestConfig)
 
 
 def _current_shanghai_date() -> str:
@@ -458,9 +466,23 @@ def _get_constituents_for_rebalance(
 
 def _build_nav_from_returns(ret_df: pd.DataFrame) -> pd.DataFrame:
     nav_df = ret_df.sort_values("date").copy()
+    for variant in ("strict", "extended"):
+        ret_col = f"zoo_{variant}_net_ret"
+        if ret_col not in nav_df:
+            nav_df[ret_col] = nav_df[f"zoo_{variant}_ret"]
+        else:
+            nav_df[ret_col] = nav_df[ret_col].fillna(nav_df[f"zoo_{variant}_ret"])
+        for suffix in ("turnover", "cost"):
+            col = f"zoo_{variant}_{suffix}"
+            if col not in nav_df:
+                nav_df[col] = 0.0
+            else:
+                nav_df[col] = nav_df[col].fillna(0.0)
     nav_df["zoo_strict_nav"] = (1 + nav_df["zoo_strict_ret"]).cumprod()
     nav_df["zoo_extended_nav"] = (1 + nav_df["zoo_extended_ret"]).cumprod()
     nav_df["benchmark_nav"] = (1 + nav_df["benchmark_ret"]).cumprod()
+    nav_df["zoo_strict_net_nav"] = (1 + nav_df["zoo_strict_net_ret"]).cumprod()
+    nav_df["zoo_extended_net_nav"] = (1 + nav_df["zoo_extended_net_ret"]).cumprod()
     return nav_df
 
 
@@ -606,6 +628,36 @@ def _resolve_day_variants(
     )
 
 
+def _trade_metrics(
+    target: pd.DataFrame,
+    previous: VariantState | None,
+    daily_prices: pd.DataFrame,
+    prev_daily: pd.DataFrame,
+    suspended: set[str],
+    config: BacktestConfig,
+) -> tuple[float, float]:
+    if not config.enabled:
+        return 0.0, 0.0
+    target_weights = _equal_weights(target)
+    current = daily_prices.set_index("ts_code")["close"]
+    previous_prices = prev_daily.set_index("ts_code")["close"]
+    tradable = pd.Series(True, index=target_weights.keys(), dtype=bool)
+    tradable.loc[tradable.index.isin(suspended)] = False
+    accounting = compute_trade_accounting(
+        previous.weights if previous is not None else None,
+        target_weights,
+        previous_prices,
+        current,
+        tradable,
+        TradeCostConfig(
+            commission_rate=config.commission_rate,
+            stamp_tax_rate=config.stamp_tax_rate,
+            slippage_rate=config.slippage_rate,
+        ),
+    )
+    return accounting.turnover, accounting.total_cost
+
+
 def compute_day(
     client: TushareLike,
     rules,
@@ -616,6 +668,7 @@ def compute_day(
     constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] | None = None,
     rules_path: Path | None = None,
     prev_state: PortfolioState | None = None,
+    backtest: BacktestConfig | None = None,
 ) -> DailyResult:
     """计算指定交易日的双指数收益与成分。daily 与 backfill 共用此函数。
 
@@ -743,6 +796,36 @@ def compute_day(
 
     new_state = PortfolioState(date=date, strict=new_strict, extended=new_extended)
 
+    backtest = backtest or BacktestConfig()
+    strict_target = (
+        strict_new_const if prev_state is None or is_rebalance or strict_anom else held_strict
+    )
+    extended_target = (
+        extended_new_const if prev_state is None or is_rebalance or extended_anom else held_extended
+    )
+    if prev_state is None or is_rebalance or strict_anom:
+        strict_turnover, strict_cost = _trade_metrics(
+            strict_target,
+            prev_state.strict if prev_state else None,
+            daily_prices,
+            prev_daily,
+            suspended,
+            backtest,
+        )
+    else:
+        strict_turnover, strict_cost = 0.0, 0.0
+    if prev_state is None or is_rebalance or extended_anom:
+        extended_turnover, extended_cost = _trade_metrics(
+            extended_target,
+            prev_state.extended if prev_state else None,
+            daily_prices,
+            prev_daily,
+            suspended,
+            backtest,
+        )
+    else:
+        extended_turnover, extended_cost = 0.0, 0.0
+
     return DailyResult(
         date=date,
         strict_ret=strict_ret,
@@ -757,6 +840,12 @@ def compute_day(
         benchmark_code=benchmark.code,
         benchmark_label=benchmark.label,
         state=new_state,
+        strict_net_ret=strict_ret - strict_cost,
+        extended_net_ret=extended_ret - extended_cost,
+        strict_turnover=strict_turnover,
+        extended_turnover=extended_turnover,
+        strict_cost=strict_cost,
+        extended_cost=extended_cost,
     )
 
 
@@ -896,6 +985,7 @@ def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
             namechange,
             rules_path=config.rules_path,
             prev_state=prev_state,
+            backtest=config.backtest,
         )
     except Exception as exc:
         print(f"计算指数失败（{date}）：{exc}")
@@ -908,6 +998,12 @@ def run_daily(config: RunConfig, client: TushareLike | None = None) -> int:
         result.strict_ret,
         result.extended_ret,
         result.benchmark_ret,
+        strict_net_ret=result.strict_net_ret,
+        extended_net_ret=result.extended_net_ret,
+        strict_turnover=result.strict_turnover,
+        extended_turnover=result.extended_turnover,
+        strict_cost=result.strict_cost,
+        extended_cost=result.extended_cost,
     )
 
     _write_changes_snapshot(
@@ -940,6 +1036,7 @@ def _backfill_run_days(
     write_snapshots: bool,
     rules_path: Path | None = None,
     prev_state: PortfolioState | None = None,
+    backtest: BacktestConfig | None = None,
 ) -> tuple[list[dict], DailyResult | None]:
     constituents_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
     ret_rows: list[dict] = []
@@ -957,6 +1054,7 @@ def _backfill_run_days(
             constituents_cache,
             rules_path=rules_path,
             prev_state=state,
+            backtest=backtest,
         )
         ret_rows.append(
             {
@@ -964,6 +1062,12 @@ def _backfill_run_days(
                 "zoo_strict_ret": result.strict_ret,
                 "zoo_extended_ret": result.extended_ret,
                 "benchmark_ret": result.benchmark_ret,
+                "zoo_strict_net_ret": result.strict_net_ret,
+                "zoo_extended_net_ret": result.extended_net_ret,
+                "zoo_strict_turnover": result.strict_turnover,
+                "zoo_extended_turnover": result.extended_turnover,
+                "zoo_strict_cost": result.strict_cost,
+                "zoo_extended_cost": result.extended_cost,
             }
         )
         # 每日写入 holdings 快照，供后续 run_daily 重建状态（去前视）。
@@ -1019,8 +1123,20 @@ def _write_backfill_outputs(
     last_result: DailyResult,
     benchmark_source: str,
 ) -> int:
+    existing_columns = [
+        "date",
+        "zoo_strict_ret",
+        "zoo_extended_ret",
+        "benchmark_ret",
+        "zoo_strict_net_ret",
+        "zoo_extended_net_ret",
+        "zoo_strict_turnover",
+        "zoo_extended_turnover",
+        "zoo_strict_cost",
+        "zoo_extended_cost",
+    ]
     existing_returns = (
-        existing_nav[["date", "zoo_strict_ret", "zoo_extended_ret", "benchmark_ret"]]
+        existing_nav[[column for column in existing_columns if column in existing_nav.columns]]
         if not existing_nav.empty
         else pd.DataFrame()
     )
@@ -1111,6 +1227,7 @@ def run_backfill(config: RunConfig, client: TushareLike | None = None) -> int:
             config.backfill_write_snapshots,
             rules_path=config.rules_path,
             prev_state=prev_state,
+            backtest=config.backtest,
         )
     except Exception as exc:
         print(f"回填计算失败：{exc}")

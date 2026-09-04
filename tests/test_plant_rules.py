@@ -16,6 +16,26 @@ def test_plant_rules_keep_core_and_expanded_words_separate() -> None:
     assert not matcher.classify("000004.SZ", "某某科技").strict
     assert matcher.classify("000005.SZ", "桃李面包").extended
     assert matcher.classify("000006.SZ", "百合股份").extended
+    assert matcher.classify("300111.SZ", "向日葵").extended
+    assert matcher.classify("002737.SZ", "葵花药业").extended
+    assert matcher.classify("000716.SZ", "黑芝麻").extended
+    assert matcher.classify("000789.SZ", "万年青").extended
+    assert matcher.classify("603737.SH", "三棵树").extended
+    assert matcher.classify("600080.SH", "金花股份").extended
     assert not matcher.classify("000007.SZ", "松芝股份").extended
+    assert matcher.classify("002050.SZ", "三花智控").extended
+    assert matcher.classify("600884.SH", "杉杉").extended
+    assert matcher.classify("001300.SZ", "三柏硕").extended
+    assert matcher.classify("002577.SZ", "雷柏科技").extended
+    assert matcher.classify("688488.SH", "艾艾精工").extended
+    assert matcher.classify("688488.SH", "艾迪药业").extended
+    assert matcher.classify("688488.SH", "艾维电子").extended
+    assert matcher.classify("605167.SH", "利柏特").extended
+    assert matcher.classify("001255.SZ", "柏星龙").extended
+    assert matcher.classify("002356.SZ", "柏堡龙").extended
+    assert matcher.classify("603268.SH", "松发").extended
+    assert matcher.classify("601003.SH", "柳钢").extended
+    assert matcher.classify("000528.SZ", "柳工").extended
+    assert matcher.classify("000683.SZ", "柳化").extended
     assert set(rules.strict_keywords).issubset(rules.extended_keywords)
     assert set(rules.extended_keywords) - set(rules.strict_keywords)
