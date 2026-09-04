@@ -41,6 +41,11 @@ jobs:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
         run: uv run python -m zoo_index --output-dir published --backfill
 
+      - name: Compute plant index (增量，仅补缺失交易日)
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+        run: uv run python -m zoo_index --rules plant_rules.yml --output-dir published/plant --backfill
+
       - name: Commit data
         run: |
           git config user.name "github-actions[bot]"

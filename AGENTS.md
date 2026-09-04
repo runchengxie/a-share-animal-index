@@ -77,3 +77,22 @@ npm run build
 
 `.github/workflows/ci.yml` 在推送与 PR 时执行 Python 质量门禁与前端质量门禁。Python 包括 ruff format 检查、ruff check、ty、pytest、uv audit。前端包括 `npm test` 与 `npm run build`。
 `.github/workflows/daily.yml` 在交易日计算并部署到 GitHub Pages，main 分支不提交任何生成物。
+
+## 动物园与植物园数据管理
+
+* `published/` 是动物园默认产物的公开真相源，包含网页使用的 JSON、`nav.csv` 与增量回填所需的 manifests。
+* `published/plant/` 是植物园独立产物，使用 `plant_rules.yml`，不得覆盖或混写动物园的 `published/data/`。
+* 动物园与植物园共享 Tushare 原始缓存、上市状态筛选、历史时点名称、流动性过滤、复权收益和增量计算逻辑，规则文件和输出目录必须显式区分。
+* 本地优先：先在本机使用已有缓存完成增量更新，确认产物和测试后提交公开数据快照。
+* Actions 只承担 fallback：使用 `--backfill-mode missing` 补齐缺失交易日，不从头下载或重算完整历史；按日期不可变的行情缓存应通过 Actions cache 或工作流缓存复用。
+* Actions 不应把 Token、代理地址、本机路径或内部运行日志复制到公开产物。网页只消费 `published/**/data` 中经过审查的公开文件。
+* 规则变更、基准变更或收益口径变更必须使用 `--backfill-mode all` 生成新的完整快照，并在 PR 中说明影响范围。
+
+## 多 agent 协作与 Git 流程
+
+* `main` 只接收经过审查的 PR，不直接在 `main` 上开发。
+* 每个独立任务必须从最新 `main` 创建独立 worktree 和分支，分支命名建议为 `feat/<topic>`、`fix/<topic>` 或 `data/<topic>`。
+* 不同 agent 不得共用同一个 worktree，不得同时修改同一分支或直接互相覆盖文件。
+* 每个 worktree 内完成测试、构建和数据边界检查后推送分支并创建 PR。
+* PR 合并到 `main` 后，删除远端旧分支、删除本地分支，并移除对应 worktree。删除前先确认 PR 已合并且没有未保存改动。
+* 大型数据回填和代码重构应拆成不同 PR，避免数据冲突掩盖代码问题。
