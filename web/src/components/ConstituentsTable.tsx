@@ -3,10 +3,11 @@ import { Constituent } from "../api";
 interface Props {
   variant: "strict" | "extended";
   items: Constituent[];
+  themeLabel?: string;
 }
 
-export default function ConstituentsTable({ variant, items }: Props) {
-  const title = variant === "strict" ? "严格动物园成分" : "扩展动物园成分";
+export default function ConstituentsTable({ variant, items, themeLabel = "动物园" }: Props) {
+  const title = variant === "strict" ? `严格${themeLabel}成分` : `扩展${themeLabel}成分`;
   return (
     <details className="constituents-table" open={variant === "strict"}>
       <summary>{title}（{items.length}）</summary>

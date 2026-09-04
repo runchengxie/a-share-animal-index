@@ -7,6 +7,8 @@ const home = readFileSync(new URL("./pages/Home.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const chart = readFileSync(new URL("./components/ZooChart.tsx", import.meta.url), "utf8");
 const constituentsTable = readFileSync(new URL("./components/ConstituentsTable.tsx", import.meta.url), "utf8");
+const changesList = readFileSync(new URL("./components/ChangesList.tsx", import.meta.url), "utf8");
+const constituentsPage = readFileSync(new URL("./pages/Constituents.tsx", import.meta.url), "utf8");
 const api = readFileSync(new URL("./api.ts", import.meta.url), "utf8");
 
 test("site shell exposes an editorial masthead and research navigation", () => {
@@ -55,4 +57,15 @@ test("NAV chart follows the low-noise research palette", () => {
 test("constituent groups can be collapsed", () => {
   assert.match(constituentsTable, /<details/);
   assert.match(constituentsTable, /<summary/);
+});
+
+test("change groups are collapsed by default", () => {
+  assert.match(changesList, /<details/);
+  assert.match(changesList, /<summary/);
+  assert.doesNotMatch(changesList, /<details open/);
+});
+
+test("constituent page loads both themes", () => {
+  assert.match(constituentsPage, /fetchThemeConstituents\("animal"\)/);
+  assert.match(constituentsPage, /fetchThemeConstituents\("plant"\)/);
 });
