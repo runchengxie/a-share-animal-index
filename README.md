@@ -64,7 +64,7 @@ npm run dev
 
 更多命令行参数（回填天数、缓存、基准切换、快照等）见 [docs/architecture.md](docs/architecture.md#使用细节)。
 
-植物园当前使用独立的 [plant_rules.yml](plant_rules.yml) 词表。它与动物园共享匹配、上市状态、ST、流动性和复权收益计算逻辑；由于当前主输出结构仍是严格/扩展动物园双变体，植物园先作为保守候选层推进，后续再将主题变体抽象成可配置的多主题输出。
+植物园当前使用独立的 [plant_rules.yml](plant_rules.yml) 词表。它与动物园共享匹配、上市状态、ST、流动性和复权收益计算逻辑。当前主输出结构仍按严格、扩展两种变体组织，植物园先作为保守候选层推进，后续再将主题变体抽象成可配置的多主题输出。
 
 ## 规则、产物与架构
 
@@ -73,7 +73,7 @@ npm run dev
 
 ## 部署
 
-项目同时部署到 GitHub Pages 和 Cloudflare Pages：`.github/workflows/daily.yml` 在每个交易日收盘后计算数据并部署 GitHub Pages；`.github/workflows/deploy-cloudflare.yml` 在 `main` 更新后使用仓库中的 `published/data` 构建并部署 Cloudflare Pages。GitHub Actions 需要配置 `TUSHARE_TOKEN`、`CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。细节见 [docs/architecture.md](docs/architecture.md#部署)。
+项目同时部署到 GitHub Pages 和 Cloudflare Pages。`.github/workflows/daily.yml` 在每个交易日收盘后计算数据并部署 GitHub Pages。`.github/workflows/deploy-cloudflare.yml` 在 `main` 更新后使用仓库中的 `published/data` 构建并部署 Cloudflare Pages。GitHub Actions 需要配置 `TUSHARE_TOKEN`、`CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。细节见 [docs/architecture.md](docs/architecture.md#部署)。
 
 ## 开发与测试
 

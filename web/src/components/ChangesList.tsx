@@ -29,7 +29,7 @@ function NoiseSection({ title, items }: { title: string; items: Constituent[] })
     <div className="change-section">
       <h4>{title}</h4>
       {items.length === 0 ? (
-        <p className="muted">无单字疑似误伤。</p>
+        <p className="muted">暂无疑似误匹配。</p>
       ) : (
         <ul>
           {items.map((c) => (
@@ -43,14 +43,14 @@ function NoiseSection({ title, items }: { title: string; items: Constituent[] })
   );
 }
 
-export default function ChangesList({ changes }: { changes: Changes }) {
+export default function ChangesList({ changes, themeLabel = "动物园" }: { changes: Changes; themeLabel?: string }) {
   return (
     <div className="changes-list">
       <p className="muted">最近调仓日期：{changes.date}</p>
-      <ChangeSection title="严格动物园" set={changes.changes.strict} />
-      <ChangeSection title="扩展动物园" set={changes.changes.extended} />
-      <NoiseSection title="单字疑似误伤（严格）" items={changes.suspected_noise.strict} />
-      <NoiseSection title="单字疑似误伤（扩展）" items={changes.suspected_noise.extended} />
+      <ChangeSection title={`严格${themeLabel}`} set={changes.changes.strict} />
+      <ChangeSection title={`扩展${themeLabel}`} set={changes.changes.extended} />
+      <NoiseSection title="疑似误匹配（严格）" items={changes.suspected_noise.strict} />
+      <NoiseSection title="疑似误匹配（扩展）" items={changes.suspected_noise.extended} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
-import { fetchMetadata } from "./api";
+import { fetchMetadata, type IndexTheme } from "./api";
 import About from "./pages/About";
 import Changes from "./pages/Changes";
 import Constituents from "./pages/Constituents";
@@ -10,6 +10,7 @@ import Methodology from "./pages/Methodology";
 
 export default function App() {
   const [updated, setUpdated] = useState<string>("");
+  const [theme, setTheme] = useState<IndexTheme>("animal");
 
   useEffect(() => {
     fetchMetadata()
@@ -22,18 +23,20 @@ export default function App() {
       <header className="site-header">
         <div className="site-masthead">
           <div>
-            <div className="brand-kicker">A-SHARE ZOO INDEX · RULE-BASED RESEARCH</div>
-            <h1>A股动物园指数</h1>
+            <div className="brand-kicker">A 股动物园 · 规则化研究</div>
+            <h1>A 股动物园指数</h1>
             <p className="site-deck">
               把一个看似荒谬的股票分类，做成公开规则、每日更新、可以复查的指数实验。
             </p>
           </div>
           <div className="site-meta" aria-label="数据更新时间">
-            <span>RESEARCH INDEX</span>
+            <span>研究指数</span>
             <strong>{updated || "等待数据"}</strong>
           </div>
         </div>
         <nav className="site-nav" aria-label="主导航">
+          <button className={theme === "animal" ? "active" : ""} onClick={() => setTheme("animal")}>动物园</button>
+          <button className={theme === "plant" ? "active" : ""} onClick={() => setTheme("plant")}>植物园</button>
           <NavLink to="/">首页</NavLink>
           <NavLink to="/methodology">方法</NavLink>
           <NavLink to="/constituents">成分</NavLink>
@@ -44,7 +47,7 @@ export default function App() {
       </header>
       <main className="site-main">
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<Home theme={theme} />} />
           <Route path="/methodology" element={<Methodology />} />
           <Route path="/constituents" element={<Constituents />} />
           <Route path="/history" element={<History />} />

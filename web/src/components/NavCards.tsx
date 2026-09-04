@@ -36,20 +36,21 @@ interface Props {
   latest: Latest;
   strictCount: number;
   extendedCount: number;
+  themeLabel?: string;
 }
 
-export default function NavCards({ latest, strictCount, extendedCount }: Props) {
+export default function NavCards({ latest, strictCount, extendedCount, themeLabel = "动物园" }: Props) {
   return (
     <div className="metric-strip">
       <NavMetric
-        title="严格动物园"
+        title={`严格${themeLabel}`}
         nav={latest.zoo_strict_nav}
         daily={latest.zoo_strict_daily}
         detail={`相对基准 ${formatPercent(latest.zoo_strict_excess)}`}
         variant="strict"
       />
       <NavMetric
-        title="扩展动物园"
+        title={`扩展${themeLabel}`}
         nav={latest.zoo_extended_nav}
         daily={latest.zoo_extended_daily}
         detail={`相对基准 ${formatPercent(latest.zoo_extended_excess)}`}
@@ -62,8 +63,8 @@ export default function NavCards({ latest, strictCount, extendedCount }: Props) 
         detail={latest.benchmark_code}
         variant="benchmark"
       />
-      <CountMetric title="严格成分" value={strictCount} detail="当前股票数" />
-      <CountMetric title="扩展成分" value={extendedCount} detail="当前股票数" />
+      <CountMetric title={`严格${themeLabel}成分`} value={strictCount} detail="当前股票数" />
+      <CountMetric title={`扩展${themeLabel}成分`} value={extendedCount} detail="当前股票数" />
     </div>
   );
 }

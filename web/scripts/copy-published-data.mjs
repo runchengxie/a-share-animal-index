@@ -29,4 +29,14 @@ for (const f of files) {
   copyFileSync(join(SRC, f), join(DEST, f));
 }
 
+const PLANT_SRC = resolve(__dirname, "../../published/plant/data");
+const PLANT_DEST = resolve(__dirname, "../public/data/plant");
+if (existsSync(PLANT_SRC)) {
+  mkdirSync(PLANT_DEST, { recursive: true });
+  for (const f of readdirSync(PLANT_SRC).filter((name) => name.endsWith(".json"))) {
+    copyFileSync(join(PLANT_SRC, f), join(PLANT_DEST, f));
+  }
+  console.log(`[copy-published-data] 已拷贝植物园数据到 ${PLANT_DEST}`);
+}
+
 console.log(`[copy-published-data] 已拷贝 ${files.length} 个 json 到 ${DEST}`);

@@ -60,6 +60,8 @@ export interface Metadata {
 
 const DATA_BASE = import.meta.env.BASE_URL;
 
+export type IndexTheme = "animal" | "plant";
+
 async function getJson<T>(file: string): Promise<T> {
   const res = await fetch(`${DATA_BASE}data/${file}`);
   if (!res.ok) {
@@ -68,11 +70,20 @@ async function getJson<T>(file: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function getThemeJson<T>(theme: IndexTheme, file: string): Promise<T> {
+  const folder = theme === "plant" ? "plant/" : "";
+  return getJson<T>(`${folder}${file}`);
+}
+
 export const fetchLatest = () => getJson<Latest>("latest.json");
 export const fetchHistory = () => getJson<NavPoint[]>("history.json");
 export const fetchConstituents = () => getJson<Constituents>("constituents.json");
 export const fetchChanges = () => getJson<Changes>("changes.json");
 export const fetchMetadata = () => getJson<Metadata>("metadata.json");
+export const fetchThemeLatest = (theme: IndexTheme) => getThemeJson<Latest>(theme, "latest.json");
+export const fetchThemeHistory = (theme: IndexTheme) => getThemeJson<NavPoint[]>(theme, "history.json");
+export const fetchThemeConstituents = (theme: IndexTheme) => getThemeJson<Constituents>(theme, "constituents.json");
+export const fetchThemeChanges = (theme: IndexTheme) => getThemeJson<Changes>(theme, "changes.json");
 
 export function formatPercent(value: number): string {
   const sign = value > 0 ? "+" : "";

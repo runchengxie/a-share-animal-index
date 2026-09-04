@@ -1,0 +1,13 @@
+{
+  "updated": "20260904",
+  "benchmark": {
+    "code": "510300.SH",
+    "label": "HS300 ETF",
+    "source": "fund"
+  },
+  "variants": [
+    "strict",
+    "extended"
+  ],
+  "rebalance": "monthly"
+}

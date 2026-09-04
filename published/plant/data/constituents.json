@@ -1,0 +1,55 @@
+{
+  "date": "20260904",
+  "strict": [
+    {
+      "ts_code": "600123.SH",
+      "name": "兰花科创",
+      "keyword": "兰花",
+      "forced": false
+    },
+    {
+      "ts_code": "600186.SH",
+      "name": "莲花控股",
+      "keyword": "莲花",
+      "forced": false
+    },
+    {
+      "ts_code": "600510.SH",
+      "name": "黑牡丹",
+      "keyword": "牡丹",
+      "forced": false
+    },
+    {
+      "ts_code": "600873.SH",
+      "name": "梅花生物",
+      "keyword": "梅花",
+      "forced": false
+    }
+  ],
+  "extended": [
+    {
+      "ts_code": "600123.SH",
+      "name": "兰花科创",
+      "keyword": "兰花",
+      "forced": false
+    },
+    {
+      "ts_code": "600186.SH",
+      "name": "莲花控股",
+      "keyword": "莲花",
+      "forced": false
+    },
+    {
+      "ts_code": "600510.SH",
+      "name": "黑牡丹",
+      "keyword": "牡丹",
+      "forced": false
+    },
+    {
+      "ts_code": "600873.SH",
+      "name": "梅花生物",
+      "keyword": "梅花",
+      "forced": false
+    }
+  ]
+}

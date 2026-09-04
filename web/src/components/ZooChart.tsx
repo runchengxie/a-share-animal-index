@@ -5,6 +5,7 @@ import { NavPoint } from "../api";
 interface Props {
   history: NavPoint[];
   benchmarkLabel: string;
+  themeLabel?: string;
 }
 
 const STRICT_COLOR = "#1267d6";
@@ -13,7 +14,7 @@ const BENCHMARK_COLOR = "#68717d";
 const RULE_COLOR = "#d9ddd9";
 const MUTED_COLOR = "#7a828c";
 
-export default function ZooChart({ history, benchmarkLabel }: Props) {
+export default function ZooChart({ history, benchmarkLabel, themeLabel = "动物园" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export default function ZooChart({ history, benchmarkLabel }: Props) {
         },
       },
       legend: {
-        data: ["严格动物园", "扩展动物园", benchmarkLabel],
+        data: [`严格${themeLabel}`, `扩展${themeLabel}`, benchmarkLabel],
         top: 0,
         left: 0,
         itemWidth: 18,
@@ -86,7 +87,7 @@ export default function ZooChart({ history, benchmarkLabel }: Props) {
       ],
       series: [
         {
-          name: "严格动物园",
+          name: `严格${themeLabel}`,
           type: "line",
           data: strict,
           showSymbol: false,
@@ -95,7 +96,7 @@ export default function ZooChart({ history, benchmarkLabel }: Props) {
           emphasis: { focus: "series" },
         },
         {
-          name: "扩展动物园",
+          name: `扩展${themeLabel}`,
           type: "line",
           data: extended,
           showSymbol: false,
@@ -123,5 +124,5 @@ export default function ZooChart({ history, benchmarkLabel }: Props) {
     };
   }, [history, benchmarkLabel]);
 
-  return <div ref={ref} className="zoo-chart" role="img" aria-label="动物园指数净值走势图" />;
+  return <div ref={ref} className="zoo-chart" role="img" aria-label={`${themeLabel}指数净值走势图`} />;
 }

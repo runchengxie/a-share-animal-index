@@ -6,10 +6,11 @@ const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const home = readFileSync(new URL("./pages/Home.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const chart = readFileSync(new URL("./components/ZooChart.tsx", import.meta.url), "utf8");
+const api = readFileSync(new URL("./api.ts", import.meta.url), "utf8");
 
 test("site shell exposes an editorial masthead and research navigation", () => {
   assert.match(app, /brand-kicker/);
-  assert.match(app, /A-SHARE ZOO INDEX/);
+  assert.match(app, /A 股动物园/);
   assert.match(app, /site-deck/);
   assert.match(app, /site-nav/);
 });
@@ -18,8 +19,14 @@ test("home page leads with a research question and index snapshot", () => {
   assert.match(home, /home-hero/);
   assert.match(home, /如果只买名字里带动物的上市公司/);
   assert.match(home, /index-snapshot/);
-  assert.match(home, /fetchConstituents/);
+  assert.match(home, /fetchThemeConstituents/);
   assert.match(home, /research-section/);
+  assert.match(home, /植物园/);
+});
+
+test("theme data is loaded from an independent plant snapshot", () => {
+  assert.match(app, /植物园/);
+  assert.match(api, /plant\//);
 });
 
 test("editorial stylesheet uses paper, rules, tabular numerals and mobile safeguards", () => {
