@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "a-share-animal-index"
+name = "a-share-zoo-garden"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

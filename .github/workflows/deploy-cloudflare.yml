@@ -38,11 +38,11 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages project create a-share-animal-index --production-branch=main
+          command: pages project create a-share-zoo-garden --production-branch=main
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy web/dist --project-name=a-share-animal-index
+          command: pages deploy web/dist --project-name=a-share-zoo-garden

@@ -13,7 +13,7 @@ const api = readFileSync(new URL("./api.ts", import.meta.url), "utf8");
 
 test("site shell exposes an editorial masthead and research navigation", () => {
   assert.match(app, /brand-kicker/);
-  assert.match(app, /A 股动物园/);
+  assert.match(app, /A 股动物园与植物园/);
   assert.match(app, /site-deck/);
   assert.match(app, /site-nav/);
   assert.doesNotMatch(app, /theme-link/);
@@ -63,6 +63,13 @@ test("change groups are collapsed by default", () => {
   assert.match(changesList, /<details/);
   assert.match(changesList, /<summary/);
   assert.doesNotMatch(changesList, /<details open/);
+});
+
+test("change page loads both themes", () => {
+  const changesPage = readFileSync(new URL("./pages/Changes.tsx", import.meta.url), "utf8");
+  assert.match(changesPage, /fetchThemeChanges\("animal"\)/);
+  assert.match(changesPage, /fetchThemeChanges\("plant"\)/);
+  assert.match(changesPage, /植物园/);
 });
 
 test("constituent page loads both themes", () => {
