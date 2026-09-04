@@ -28,6 +28,18 @@
   ],
   "extended": [
     {
+      "ts_code": "000812.SZ",
+      "name": "陕西金叶",
+      "keyword": "金叶",
+      "forced": false
+    },
+    {
+      "ts_code": "002058.SZ",
+      "name": "紫竹高科",
+      "keyword": "紫竹",
+      "forced": false
+    },
+    {
       "ts_code": "600123.SH",
       "name": "兰花科创",
       "keyword": "兰花",
@@ -40,6 +52,18 @@
       "forced": false
     },
     {
+      "ts_code": "600425.SH",
+      "name": "青松建化",
+      "keyword": "青松",
+      "forced": false
+    },
+    {
+      "ts_code": "600493.SH",
+      "name": "凤竹纺织",
+      "keyword": "凤竹",
+      "forced": false
+    },
+    {
       "ts_code": "600510.SH",
       "name": "黑牡丹",
       "keyword": "牡丹",
@@ -49,6 +73,36 @@
       "ts_code": "600873.SH",
       "name": "梅花生物",
       "keyword": "梅花",
+      "forced": false
+    },
+    {
+      "ts_code": "603102.SH",
+      "name": "百合股份",
+      "keyword": "百合",
+      "forced": false
+    },
+    {
+      "ts_code": "603313.SH",
+      "name": "梦百合",
+      "keyword": "百合",
+      "forced": false
+    },
+    {
+      "ts_code": "603615.SH",
+      "name": "茶花股份",
+      "keyword": "茶花",
+      "forced": false
+    },
+    {
+      "ts_code": "603823.SH",
+      "name": "百合花",
+      "keyword": "百合",
+      "forced": false
+    },
+    {
+      "ts_code": "603866.SH",
+      "name": "桃李面包",
+      "keyword": "桃李",
       "forced": false
     }
   ]
