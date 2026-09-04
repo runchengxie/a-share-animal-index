@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
-import { fetchMetadata, type IndexTheme } from "./api";
+import { fetchMetadata } from "./api";
 import About from "./pages/About";
 import Changes from "./pages/Changes";
 import Constituents from "./pages/Constituents";
@@ -10,8 +10,6 @@ import Methodology from "./pages/Methodology";
 
 export default function App() {
   const [updated, setUpdated] = useState<string>("");
-  const [theme, setTheme] = useState<IndexTheme>("animal");
-
   useEffect(() => {
     fetchMetadata()
       .then((metadata) => setUpdated(metadata.updated))
@@ -35,8 +33,8 @@ export default function App() {
           </div>
         </div>
         <nav className="site-nav" aria-label="主导航">
-          <button className={theme === "animal" ? "active" : ""} onClick={() => setTheme("animal")}>动物园</button>
-          <button className={theme === "plant" ? "active" : ""} onClick={() => setTheme("plant")}>植物园</button>
+          <a className="theme-link" href="#animal-panel">动物园</a>
+          <a className="theme-link" href="#plant-panel">植物园</a>
           <NavLink to="/">首页</NavLink>
           <NavLink to="/methodology">方法</NavLink>
           <NavLink to="/constituents">成分</NavLink>
@@ -47,7 +45,7 @@ export default function App() {
       </header>
       <main className="site-main">
         <Routes>
-          <Route path="/" element={<Home theme={theme} />} />
+          <Route path="/" element={<Home />} />
           <Route path="/methodology" element={<Methodology />} />
           <Route path="/constituents" element={<Constituents />} />
           <Route path="/history" element={<History />} />

@@ -17,9 +17,12 @@ test("site shell exposes an editorial masthead and research navigation", () => {
 
 test("home page leads with a research question and index snapshot", () => {
   assert.match(home, /home-hero/);
-  assert.match(home, /如果只买名字里带动物的上市公司/);
+  assert.match(home, /名字里的动物和植物/);
   assert.match(home, /index-snapshot/);
   assert.match(home, /fetchThemeConstituents/);
+  assert.match(home, /fetchThemeData\("animal"\)/);
+  assert.match(home, /fetchThemeData\("plant"\)/);
+  assert.match(home, /id=\{`\$\{theme\}-panel`\}/);
   assert.match(home, /research-section/);
   assert.match(home, /植物园/);
 });

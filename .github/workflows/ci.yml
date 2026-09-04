@@ -54,7 +54,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Frontend contract tests
         run: npm test
