@@ -13,6 +13,7 @@
 - 规则词表 + 强制名单，结果可复现
 - 每日生成净值、曲线图、徽章与网页
 - 可选生成含换手、交易成本的可交易回测诊断
+- 可选运行名称审计，发现规则漏收与疑似误收
 - 网页按研究报告式信息层级展示指数快照、净值、调仓、成分与方法
 
 ## 快速开始
@@ -61,9 +62,12 @@ npm run dev
 | `uv run zoo-index` | 更新最近一个交易日 |
 | `uv run zoo-index --backfill` | 回填最近 5 年历史 |
 | `uv run zoo-chart` | 仅重绘图表，不调用 Tushare |
+| `uv run zoo-audit --date YYYYMMDD` | 生成确定性收录审核候选 |
 | `make daily` / `make backfill` / `make chart` / `make test` | Makefile 快捷命令 |
 
 更多命令行参数（回填天数、缓存、基准切换、快照等）见 [docs/architecture.md](docs/architecture.md#使用细节)。
+
+名称审计默认只生成本地 `artifacts/audit/` 报告，不修改规则和指数成分。配置 `GEMINI_API_KEY` 或 `OPENROUTER_API_KEY` 后，可追加 `--llm` 进行批量语义复核，LLM 失败不会影响 `zoo-index`。
 
 植物园当前使用独立的 [plant_rules.yml](plant_rules.yml) 词表。它与动物园共享匹配、上市状态、ST、流动性和复权收益计算逻辑。主输出结构按动物园、植物园两个主题分别组织，每个主题含严格、扩展两种变体。
 

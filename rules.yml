@@ -20,6 +20,8 @@ strict_keywords:
   - 猫头鹰
   - 鹦鹉
   - 蜜蜂
+  - 螳螂
+  - 骆驼
 
 # 扩展关键词加入单字或泛化动物词，噪声相对更高。
 extended_keywords:
@@ -51,6 +53,9 @@ extended_keywords:
   - 蝶
   - 豚
   - 鲨
+  - 獐
+  - 麒麟
+  - 凤凰
 
 exclude_patterns:
   - 马钢

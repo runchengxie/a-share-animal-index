@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 zoo-index = "zoo_index.cli:main"
 zoo-chart = "redraw_chart:main"
+zoo-audit = "zoo_index.cli:audit_main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
