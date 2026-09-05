@@ -2,9 +2,21 @@ from __future__ import annotations
 
 import argparse
 import os
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-from zoo_index.config import load_backtest_config
+import pandas as pd
+
+from zoo_index.audit import (
+    build_audit_candidates,
+    build_audit_result,
+    run_llm_audit,
+    write_audit_report,
+)
+from zoo_index.config import load_backtest_config, load_rules
+from zoo_index.data_sources.tushare import TushareClient
+from zoo_index.llm import FallbackChain, GeminiProvider, LLMProvider, OpenRouterProvider
 from zoo_index.runner import (
     DEFAULT_BACKFILL_YEARS,
     DEFAULT_BENCHMARK_CODE,
@@ -165,6 +177,101 @@ def main() -> int:
     if config is None:
         return 1
     return run(config)
+
+
+def _read_table(path: Path) -> pd.DataFrame:
+    if path.suffix.lower() == ".parquet":
+        return pd.read_parquet(path)
+    if path.suffix.lower() in {".csv", ".txt"}:
+        return pd.read_csv(path)
+    raise ValueError(f"unsupported input format: {path.suffix}")
+
+
+def _audit_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="生成 A 股动物园与植物园审核候选")
+    parser.add_argument("--date", default="", help="名称时点 YYYYMMDD，默认上海时区今天")
+    parser.add_argument("--rules", default="", help="规则文件路径")
+    parser.add_argument("--input", default="", help="本地 stock_basic CSV/Parquet")
+    parser.add_argument("--namechange-input", default="", help="本地 namechange CSV/Parquet")
+    parser.add_argument("--mode", choices=("all", "recall", "precision"), default="all")
+    parser.add_argument("--output-dir", default="", help="审核报告输出目录")
+    parser.add_argument("--token", default="", help="Tushare Token")
+    parser.add_argument("--llm", action="store_true", help="调用配置好的 LLM 审核候选")
+    parser.add_argument("--batch-size", type=int, default=200, help="每次 LLM 请求的候选数")
+    return parser.parse_args()
+
+
+def audit_main() -> int:
+    args = _audit_args()
+    repo_root = Path(__file__).resolve().parents[2]
+    as_of = args.date.strip() or datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+    rules_path = Path(args.rules).resolve() if args.rules else repo_root / "rules.yml"
+    output_dir = (
+        Path(args.output_dir).resolve() if args.output_dir else repo_root / "artifacts" / "audit"
+    )
+
+    try:
+        rules = load_rules(rules_path)
+        if args.input:
+            stock_basic = _read_table(Path(args.input).resolve())
+            namechange = (
+                _read_table(Path(args.namechange_input).resolve())
+                if args.namechange_input
+                else pd.DataFrame()
+            )
+        else:
+            token = args.token.strip() or os.getenv("TUSHARE_TOKEN", "").strip()
+            if not token:
+                print("缺少 Tushare Token，离线模式请传入 --input。")
+                return 1
+            client = TushareClient(token, cache_dir=repo_root / "data" / "cache")
+            stock_basic = client.get_stock_basic()
+            namechange = client.get_namechange()
+
+        candidates = build_audit_candidates(stock_basic, namechange, as_of, rules, args.mode)
+        llm_rows = ()
+        provider_attempts = ()
+        llm_status = "not_requested"
+        if args.llm:
+            gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+            openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+            providers: list[LLMProvider] = []
+            if gemini_key:
+                providers.append(
+                    GeminiProvider(
+                        gemini_key,
+                        os.getenv("ZOO_AUDIT_GEMINI_MODEL", "gemini-2.5-flash"),
+                    )
+                )
+            if openrouter_key:
+                pinned = os.getenv("ZOO_AUDIT_OPENROUTER_MODEL", "").strip()
+                if pinned:
+                    providers.append(OpenRouterProvider(openrouter_key, pinned))
+                providers.append(OpenRouterProvider(openrouter_key, "openrouter/free"))
+            if not providers:
+                print("--llm 已启用，但未配置 GEMINI_API_KEY 或 OPENROUTER_API_KEY。")
+                llm_status = "provider_unavailable"
+            else:
+                llm_rows, provider_attempts, llm_status = run_llm_audit(
+                    candidates, FallbackChain(providers), args.batch_size
+                )
+        result = build_audit_result(
+            stock_basic,
+            candidates,
+            as_of,
+            rules,
+            args.mode,
+            llm_rows=llm_rows,
+            provider_attempts=provider_attempts,
+            llm_status=llm_status,
+        )
+        json_path, markdown_path = write_audit_report(result, output_dir)
+        print(f"已生成审核报告：{json_path}")
+        print(f"已生成审核摘要：{markdown_path}")
+        return 0
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"生成审核报告失败：{exc}")
+        return 1
 
 
 if __name__ == "__main__":

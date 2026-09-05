@@ -89,6 +89,15 @@ export TUSHARE_API_URL=https://<转发代理地址>
 - 缓存：默认启用 `data/cache/`；`--no-cache` 禁用，`--force-refresh` 强制刷新。
 - 基准：`--benchmark` / `--benchmark-source` / `--benchmark-label` 切换基准。ETF 基准需 `fund_daily` / `fund_adj` 权限（约 2000 积分）；权限不足可回退到 `--benchmark-source index --benchmark 000300.SH` 的价格口径。
 
+名称审核命令：
+
+```bash
+uv run zoo-audit --date 20260904 --mode all --output-dir artifacts/audit
+uv run zoo-audit --date 20260904 --mode all --llm --batch-size 200
+```
+
+审核命令可以使用 `--input stock_basic.parquet` 和 `--namechange-input namechange.parquet` 离线运行。它只写 `artifacts/audit/`，不会修改 `rules.yml`、`plant_rules.yml` 或 `published/`。`--llm` 使用 Gemini 作为首选，随后尝试配置的 OpenRouter 固定模型，最后才尝试 `openrouter/free`。
+
 可交易回测参数位于仓库根目录 `backtest.yml`，默认 `enabled: false` 且各项成本率为 0。启用后，`nav.csv` 会增加 `zoo_*_net_ret`、`zoo_*_net_nav`、`zoo_*_turnover` 和 `zoo_*_cost` 字段。
 
 仅重绘图表（不调用 Tushare）：
